@@ -73,18 +73,12 @@ export default function ProductQuickView({
               </button>
             </div>
 
-            {product.desc && (
-              <p className="mt-4 text-sm leading-relaxed opacity-80">
-                {product.desc}
-              </p>
-            )}
-
+            {/* PRICE */}
             <div className="mt-6 flex items-center justify-between">
-              <div className="text-lg font-bold">
-                ₹{product.price}
-              </div>
+              <div className="text-lg font-bold">₹{product.price}</div>
             </div>
 
+            {/* ACTIONS */}
             <div className="mt-6 grid grid-cols-2 gap-3">
               <button
                 className="btn-primary py-2 px-4 rounded-xl text-sm"
