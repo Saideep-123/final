@@ -21,7 +21,7 @@ type Shipping = {
 };
 
 const STORAGE_KEY = "konaseema_shipping_v1";
-const WHATSAPP_NUMBER = "91XXXXXXXXXX"; // TODO: replace (countrycode+number, no +)
+const WHATSAPP_NUMBER = "91XXXXXXXXXX"; // TODO: replace (no +)
 
 function requiredLabel(text: string) {
   return (
@@ -91,7 +91,7 @@ export default function CheckoutPage() {
 
   const isValid = Object.keys(errors).length === 0;
 
-  const buildWhatsAppMessage = (orderId: string) => {
+  const buildWhatsAppText = (orderId: number) => {
     const lines = cart.items.map((i: any) => {
       const w = i.weight ? ` (${i.weight})` : "";
       return `• ${i.name}${w} x${i.qty} = ₹${i.qty * i.price}`;
@@ -119,15 +119,14 @@ export default function CheckoutPage() {
     ].join("\n");
   };
 
-  const saveOrderToDb = async (): Promise<string> => {
-    // require logged in user (because orders should be tied to user)
+  const saveOrderToDb = async (): Promise<number> => {
+    // must be logged in (RLS expects auth.uid())
     const { data: userData, error: userErr } = await supabase.auth.getUser();
     if (userErr) throw new Error(userErr.message);
     if (!userData.user) throw new Error("Please login to place the order.");
 
     const userId = userData.user.id;
 
-    // totals
     const subtotal = cart.items.reduce(
       (s: number, it: any) => s + Number(it.price) * Number(it.qty),
       0
@@ -135,7 +134,7 @@ export default function CheckoutPage() {
     const shippingFee = 0;
     const total = subtotal + shippingFee;
 
-    // 1) Address
+    // 1) Address (your columns match this)
     const { data: address, error: addrErr } = await supabase
       .from("addresses")
       .insert({
@@ -148,12 +147,12 @@ export default function CheckoutPage() {
         city: shipping.city.trim(),
         state: shipping.state.trim(),
         postal_code: shipping.zip.trim(),
-        country: shipping.country.trim() || "United States",
+        country: shipping.country.trim(),
       })
       .select("id")
       .single();
 
-    if (addrErr) throw new Error(`Address insert failed: ${addrErr.message}`);
+    if (addrErr) throw new Error(addrErr.message);
 
     // 2) Order
     const { data: order, error: orderErr } = await supabase
@@ -171,21 +170,21 @@ export default function CheckoutPage() {
       .select("id")
       .single();
 
-    if (orderErr) throw new Error(`Order insert failed: ${orderErr.message}`);
+    if (orderErr) throw new Error(orderErr.message);
 
-    // 3) Order items (minimal fields)
+    // 3) Order items (keep minimal to avoid column mismatch)
     const itemsPayload = cart.items.map((i: any) => ({
       order_id: order.id,
-      product_id: i.id, // IMPORTANT: don't force String unless DB is text
-      name: i.name,
+      product_id: String(i.id),
+      name: String(i.name),
       price: Number(i.price),
       qty: Number(i.qty),
     }));
 
     const { error: itemsErr } = await supabase.from("order_items").insert(itemsPayload);
-    if (itemsErr) throw new Error(`Order items insert failed: ${itemsErr.message}`);
+    if (itemsErr) throw new Error(itemsErr.message);
 
-    return String(order.id);
+    return Number(order.id);
   };
 
   const onSendWhatsApp = async () => {
@@ -209,11 +208,9 @@ export default function CheckoutPage() {
 
       const orderId = await saveOrderToDb();
 
-      const text = buildWhatsAppMessage(orderId);
-      const link = `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(text)}`;
-
+      const msg = buildWhatsAppText(orderId);
+      const link = `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(msg)}`;
       window.open(link, "_blank");
-      // cart.clear(); // optional
     } catch (e: any) {
       setSaveError(e?.message || "Failed to save order. Please try again.");
     } finally {
@@ -233,8 +230,7 @@ export default function CheckoutPage() {
           <div className="mb-8">
             <h1 className="text-4xl mb-2">Checkout</h1>
             <p className="opacity-75">
-              Add delivery details for US courier shipping. Required fields are marked with{" "}
-              <span className="text-red-600">*</span>.
+              Required fields are marked with <span className="text-red-600">*</span>.
             </p>
           </div>
 
@@ -244,9 +240,7 @@ export default function CheckoutPage() {
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="md:col-span-2">
-                  <label className="block text-sm font-semibold mb-1">
-                    {requiredLabel("Full Name")}
-                  </label>
+                  <label className="block text-sm font-semibold mb-1">{requiredLabel("Full Name")}</label>
                   <input
                     value={shipping.fullName}
                     onChange={(e) => setShipping((s) => ({ ...s, fullName: e.target.value }))}
@@ -254,15 +248,11 @@ export default function CheckoutPage() {
                     className={`${inputBase} ${touched.fullName && errors.fullName ? inputErr : ""}`}
                     placeholder="Recipient full name"
                   />
-                  {touched.fullName && errors.fullName && (
-                    <p className="text-sm text-red-600 mt-1">{errors.fullName}</p>
-                  )}
+                  {touched.fullName && errors.fullName && <p className="text-sm text-red-600 mt-1">{errors.fullName}</p>}
                 </div>
 
                 <div>
-                  <label className="block text-sm font-semibold mb-1">
-                    {requiredLabel("Email")}
-                  </label>
+                  <label className="block text-sm font-semibold mb-1">{requiredLabel("Email")}</label>
                   <input
                     value={shipping.email}
                     onChange={(e) => setShipping((s) => ({ ...s, email: e.target.value }))}
@@ -270,31 +260,23 @@ export default function CheckoutPage() {
                     className={`${inputBase} ${touched.email && errors.email ? inputErr : ""}`}
                     placeholder="name@example.com"
                   />
-                  {touched.email && errors.email && (
-                    <p className="text-sm text-red-600 mt-1">{errors.email}</p>
-                  )}
+                  {touched.email && errors.email && <p className="text-sm text-red-600 mt-1">{errors.email}</p>}
                 </div>
 
                 <div>
-                  <label className="block text-sm font-semibold mb-1">
-                    {requiredLabel("Mobile / Phone")}
-                  </label>
+                  <label className="block text-sm font-semibold mb-1">{requiredLabel("Mobile / Phone")}</label>
                   <input
                     value={shipping.phone}
                     onChange={(e) => setShipping((s) => ({ ...s, phone: e.target.value }))}
                     onBlur={() => setTouched((t) => ({ ...t, phone: true }))}
                     className={`${inputBase} ${touched.phone && errors.phone ? inputErr : ""}`}
-                    placeholder="US phone number"
+                    placeholder="Phone number"
                   />
-                  {touched.phone && errors.phone && (
-                    <p className="text-sm text-red-600 mt-1">{errors.phone}</p>
-                  )}
+                  {touched.phone && errors.phone && <p className="text-sm text-red-600 mt-1">{errors.phone}</p>}
                 </div>
 
                 <div className="md:col-span-2">
-                  <label className="block text-sm font-semibold mb-1">
-                    {requiredLabel("Country")}
-                  </label>
+                  <label className="block text-sm font-semibold mb-1">{requiredLabel("Country")}</label>
                   <input
                     value={shipping.country}
                     onChange={(e) => setShipping((s) => ({ ...s, country: e.target.value }))}
@@ -302,15 +284,11 @@ export default function CheckoutPage() {
                     className={`${inputBase} ${touched.country && errors.country ? inputErr : ""}`}
                     placeholder="United States"
                   />
-                  {touched.country && errors.country && (
-                    <p className="text-sm text-red-600 mt-1">{errors.country}</p>
-                  )}
+                  {touched.country && errors.country && <p className="text-sm text-red-600 mt-1">{errors.country}</p>}
                 </div>
 
                 <div className="md:col-span-2">
-                  <label className="block text-sm font-semibold mb-1">
-                    {requiredLabel("Address Line 1")}
-                  </label>
+                  <label className="block text-sm font-semibold mb-1">{requiredLabel("Address Line 1")}</label>
                   <input
                     value={shipping.address1}
                     onChange={(e) => setShipping((s) => ({ ...s, address1: e.target.value }))}
@@ -318,9 +296,7 @@ export default function CheckoutPage() {
                     className={`${inputBase} ${touched.address1 && errors.address1 ? inputErr : ""}`}
                     placeholder="Street address, house number"
                   />
-                  {touched.address1 && errors.address1 && (
-                    <p className="text-sm text-red-600 mt-1">{errors.address1}</p>
-                  )}
+                  {touched.address1 && errors.address1 && <p className="text-sm text-red-600 mt-1">{errors.address1}</p>}
                 </div>
 
                 <div className="md:col-span-2">
@@ -334,9 +310,7 @@ export default function CheckoutPage() {
                 </div>
 
                 <div>
-                  <label className="block text-sm font-semibold mb-1">
-                    {requiredLabel("City")}
-                  </label>
+                  <label className="block text-sm font-semibold mb-1">{requiredLabel("City")}</label>
                   <input
                     value={shipping.city}
                     onChange={(e) => setShipping((s) => ({ ...s, city: e.target.value }))}
@@ -344,15 +318,11 @@ export default function CheckoutPage() {
                     className={`${inputBase} ${touched.city && errors.city ? inputErr : ""}`}
                     placeholder="City"
                   />
-                  {touched.city && errors.city && (
-                    <p className="text-sm text-red-600 mt-1">{errors.city}</p>
-                  )}
+                  {touched.city && errors.city && <p className="text-sm text-red-600 mt-1">{errors.city}</p>}
                 </div>
 
                 <div>
-                  <label className="block text-sm font-semibold mb-1">
-                    {requiredLabel("State")}
-                  </label>
+                  <label className="block text-sm font-semibold mb-1">{requiredLabel("State")}</label>
                   <input
                     value={shipping.state}
                     onChange={(e) => setShipping((s) => ({ ...s, state: e.target.value }))}
@@ -360,15 +330,11 @@ export default function CheckoutPage() {
                     className={`${inputBase} ${touched.state && errors.state ? inputErr : ""}`}
                     placeholder="State"
                   />
-                  {touched.state && errors.state && (
-                    <p className="text-sm text-red-600 mt-1">{errors.state}</p>
-                  )}
+                  {touched.state && errors.state && <p className="text-sm text-red-600 mt-1">{errors.state}</p>}
                 </div>
 
                 <div className="md:col-span-2">
-                  <label className="block text-sm font-semibold mb-1">
-                    {requiredLabel("ZIP / Postal Code")}
-                  </label>
+                  <label className="block text-sm font-semibold mb-1">{requiredLabel("ZIP / Postal Code")}</label>
                   <input
                     value={shipping.zip}
                     onChange={(e) => setShipping((s) => ({ ...s, zip: e.target.value }))}
@@ -376,9 +342,7 @@ export default function CheckoutPage() {
                     className={`${inputBase} ${touched.zip && errors.zip ? inputErr : ""}`}
                     placeholder="ZIP code"
                   />
-                  {touched.zip && errors.zip && (
-                    <p className="text-sm text-red-600 mt-1">{errors.zip}</p>
-                  )}
+                  {touched.zip && errors.zip && <p className="text-sm text-red-600 mt-1">{errors.zip}</p>}
                 </div>
 
                 <div className="md:col-span-2">
@@ -412,16 +376,8 @@ export default function CheckoutPage() {
               </div>
 
               {saveError && <p className="mt-3 text-sm text-red-600">{saveError}</p>}
-              {!isValid && (
-                <p className="mt-3 text-sm text-red-600">
-                  Please fill all required fields to continue.
-                </p>
-              )}
-              {cart.items.length === 0 && (
-                <p className="mt-3 text-sm text-red-600">
-                  Your cart is empty. Add items to proceed.
-                </p>
-              )}
+              {!isValid && <p className="mt-3 text-sm text-red-600">Please fill all required fields.</p>}
+              {cart.items.length === 0 && <p className="mt-3 text-sm text-red-600">Your cart is empty.</p>}
             </section>
 
             <aside className="lg:col-span-2 premium-card p-6 h-fit">
@@ -433,11 +389,7 @@ export default function CheckoutPage() {
                 <div className="space-y-4">
                   {cart.items.map((i: any) => (
                     <div key={i.id} className="flex gap-3">
-                      <img
-                        src={i.image}
-                        className="w-14 h-14 rounded-lg object-cover"
-                        alt={i.name}
-                      />
+                      <img src={i.image} className="w-14 h-14 rounded-lg object-cover" alt={i.name} />
                       <div className="flex-1">
                         <div className="flex items-start justify-between gap-4">
                           <div>
@@ -453,7 +405,6 @@ export default function CheckoutPage() {
                               className="px-3 py-1 border border-gold rounded-full"
                               onClick={() => cart.dec(i.id)}
                               type="button"
-                              aria-label={`Decrease ${i.name}`}
                             >
                               -
                             </button>
@@ -462,7 +413,6 @@ export default function CheckoutPage() {
                               className="px-3 py-1 border border-gold rounded-full"
                               onClick={() => cart.inc(i.id)}
                               type="button"
-                              aria-label={`Increase ${i.name}`}
                             >
                               +
                             </button>
