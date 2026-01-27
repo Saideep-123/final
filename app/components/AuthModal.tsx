@@ -15,13 +15,14 @@ export default function AuthModal({
   const [mode, setMode] = useState<"login" | "signup">("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-
-  const [fullName, setFullName] = useState(""); // signup only
+  const [fullName, setFullName] = useState("");
   const [msg, setMsg] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
     if (open) window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onClose]);
@@ -30,6 +31,10 @@ export default function AuthModal({
     if (!open) {
       setMsg(null);
       setLoading(false);
+      setMode("login");
+      setEmail("");
+      setPassword("");
+      setFullName("");
     }
   }, [open]);
 
@@ -50,7 +55,7 @@ export default function AuthModal({
     const r = await signUp({ email, password, fullName });
     setLoading(false);
     if (!r.ok) return setMsg(r.error || "Signup failed");
-    setMsg("Account created. You can login now.");
+    setMsg("Account created. Please login.");
     setMode("login");
   };
 
@@ -64,11 +69,12 @@ export default function AuthModal({
         aria-label="Close"
       />
 
-      {/* modal card */}
-      <div className="relative w-[92%] max-w-xl bg-[#fffaf2] rounded-2xl border border-[#e8dccb] shadow-2xl overflow-hidden">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-[#e8dccb]">
-          <h3 className="text-lg font-semibold">
-            {mode === "login" ? "Login" : "Sign Up"}
+      {/* card */}
+      <div className="relative w-[92%] max-w-[560px] bg-[#fffaf2] rounded-2xl border border-[#e8dccb] shadow-2xl">
+        {/* header */}
+        <div className="flex items-center justify-between px-7 py-5 border-b border-[#e8dccb]">
+          <h3 className="text-xl font-semibold">
+            {mode === "login" ? "Login" : "Sign up"}
           </h3>
           <button
             type="button"
@@ -80,23 +86,22 @@ export default function AuthModal({
           </button>
         </div>
 
-        <div className="p-6">
+        {/* body */}
+        <div className="px-7 pt-6 pb-7">
           {mode === "signup" && (
-            <>
-              <input
-                value={fullName}
-                onChange={(e) => setFullName(e.target.value)}
-                placeholder="Full name"
-                className="w-full px-4 py-3 rounded-xl border border-[#e8dccb] bg-white focus:outline-none mb-3"
-              />
-            </>
+            <input
+              value={fullName}
+              onChange={(e) => setFullName(e.target.value)}
+              placeholder="Full name"
+              className="w-full px-5 py-4 rounded-2xl border border-[#d9c4a7] bg-white focus:outline-none mb-4 text-[16px]"
+            />
           )}
 
           <input
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             placeholder="Email"
-            className="w-full px-4 py-3 rounded-xl border border-[#e8dccb] bg-white focus:outline-none mb-3"
+            className="w-full px-5 py-4 rounded-2xl border border-[#d9c4a7] bg-white focus:outline-none mb-4 text-[16px]"
           />
 
           <input
@@ -104,19 +109,19 @@ export default function AuthModal({
             onChange={(e) => setPassword(e.target.value)}
             placeholder="Password"
             type="password"
-            className="w-full px-4 py-3 rounded-xl border border-[#e8dccb] bg-white focus:outline-none mb-4"
+            className="w-full px-5 py-4 rounded-2xl border border-[#d9c4a7] bg-white focus:outline-none mb-5 text-[16px]"
           />
 
           <button
             type="button"
             disabled={loading}
             onClick={submit}
-            className="w-full py-2.5 rounded-xl border border-[#c9a36a] hover:bg-[#c9a36a] hover:text-white transition font-semibold"
+            className="w-full py-3 rounded-xl border border-[#d9c4a7] bg-[#fffaf2] hover:bg-[#f6efe6] transition font-semibold"
           >
             {loading ? "Please wait..." : mode === "login" ? "Login" : "Create account"}
           </button>
 
-          {msg && <div className="mt-3 text-sm opacity-80">{msg}</div>}
+          {msg && <div className="mt-3 text-sm opacity-80 text-center">{msg}</div>}
 
           <div className="mt-4 text-sm text-center opacity-80">
             {mode === "login" ? (
