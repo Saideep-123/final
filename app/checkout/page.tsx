@@ -21,7 +21,7 @@ type Shipping = {
 };
 
 const STORAGE_KEY = "konaseema_shipping_v1";
-const WHATSAPP_NUMBER = "91XXXXXXXXXX"; // TODO: replace (no +)
+const WHATSAPP_NUMBER = "91XXXXXXXXXX"; // TODO: replace (countrycode+number, no +)
 
 function requiredLabel(text: string) {
   return (
@@ -103,14 +103,12 @@ export default function CheckoutPage() {
       `Email: ${shipping.email}`,
       `Phone: ${shipping.phone}`,
       `Country: ${shipping.country}`,
-      `Address: ${shipping.address1}${
-        shipping.address2.trim() ? ", " + shipping.address2.trim() : ""
-      }`,
+      `Address: ${shipping.address1}${shipping.address2.trim() ? ", " + shipping.address2.trim() : ""}`,
       `City/State/ZIP: ${shipping.city}, ${shipping.state} ${shipping.zip}`,
       shipping.deliveryNotes.trim() ? `Notes: ${shipping.deliveryNotes.trim()}` : null,
     ].filter(Boolean);
 
-    const text = [
+    return [
       "Hi Konaseema Foods, I want to order:",
       ...lines,
       "",
@@ -119,24 +117,15 @@ export default function CheckoutPage() {
       "Delivery Details:",
       ...shipLines,
     ].join("\n");
-
-    return encodeURIComponent(text);
   };
 
-  /**
-   * Saves:
-   * 1) addresses (your confirmed columns)
-   * 2) orders (must exist with address_id/user_id/subtotal/shipping/total/currency/status/notes)
-   * 3) order_items (minimal columns: order_id/product_id/name/price/qty)
-   */
   const saveOrderToDb = async (): Promise<string> => {
-    // 0) ensure logged in
+    // require logged in user (because orders should be tied to user)
     const { data: userData, error: userErr } = await supabase.auth.getUser();
     if (userErr) throw new Error(userErr.message);
     if (!userData.user) throw new Error("Please login to place the order.");
 
     const userId = userData.user.id;
-    console.log("USER ✅", userId);
 
     // totals
     const subtotal = cart.items.reduce(
@@ -146,7 +135,7 @@ export default function CheckoutPage() {
     const shippingFee = 0;
     const total = subtotal + shippingFee;
 
-    // 1) insert address
+    // 1) Address
     const { data: address, error: addrErr } = await supabase
       .from("addresses")
       .insert({
@@ -164,12 +153,9 @@ export default function CheckoutPage() {
       .select("id")
       .single();
 
-    if (addrErr) {
-      console.log("ADDR ERROR FULL:", addrErr);
-      throw new Error(addrErr.message);
-    }
+    if (addrErr) throw new Error(`Address insert failed: ${addrErr.message}`);
 
-    // 2) insert order
+    // 2) Order
     const { data: order, error: orderErr } = await supabase
       .from("orders")
       .insert({
@@ -185,32 +171,24 @@ export default function CheckoutPage() {
       .select("id")
       .single();
 
-    if (orderErr) {
-      console.log("ORDER ERROR FULL:", orderErr);
-      throw new Error(orderErr.message);
-    }
+    if (orderErr) throw new Error(`Order insert failed: ${orderErr.message}`);
 
-    // 3) insert order items (minimal fields to avoid column mismatch)
+    // 3) Order items (minimal fields)
     const itemsPayload = cart.items.map((i: any) => ({
       order_id: order.id,
-      product_id: String(i.id),
+      product_id: i.id, // IMPORTANT: don't force String unless DB is text
       name: i.name,
       price: Number(i.price),
       qty: Number(i.qty),
     }));
 
     const { error: itemsErr } = await supabase.from("order_items").insert(itemsPayload);
-    if (itemsErr) {
-      console.log("ITEMS ERROR FULL:", itemsErr);
-      throw new Error(itemsErr.message);
-    }
+    if (itemsErr) throw new Error(`Order items insert failed: ${itemsErr.message}`);
 
     return String(order.id);
   };
 
   const onSendWhatsApp = async () => {
-    console.log("CLICKED ✅");
-
     setTouched({
       fullName: true,
       email: true,
@@ -231,14 +209,12 @@ export default function CheckoutPage() {
 
       const orderId = await saveOrderToDb();
 
-      const msg = buildWhatsAppMessage(orderId);
-      const link = `https://wa.me/${WHATSAPP_NUMBER}?text=${msg}`;
+      const text = buildWhatsAppMessage(orderId);
+      const link = `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(text)}`;
 
       window.open(link, "_blank");
-      // optional:
-      // cart.clear();
+      // cart.clear(); // optional
     } catch (e: any) {
-      console.log("SAVE ERROR FULL:", e);
       setSaveError(e?.message || "Failed to save order. Please try again.");
     } finally {
       setSaving(false);
@@ -263,7 +239,6 @@ export default function CheckoutPage() {
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-5 gap-8">
-            {/* LEFT: Delivery form */}
             <section className="lg:col-span-3 premium-card p-6">
               <h2 className="text-2xl mb-4">Delivery Details</h2>
 
@@ -285,7 +260,9 @@ export default function CheckoutPage() {
                 </div>
 
                 <div>
-                  <label className="block text-sm font-semibold mb-1">{requiredLabel("Email")}</label>
+                  <label className="block text-sm font-semibold mb-1">
+                    {requiredLabel("Email")}
+                  </label>
                   <input
                     value={shipping.email}
                     onChange={(e) => setShipping((s) => ({ ...s, email: e.target.value }))}
@@ -357,7 +334,9 @@ export default function CheckoutPage() {
                 </div>
 
                 <div>
-                  <label className="block text-sm font-semibold mb-1">{requiredLabel("City")}</label>
+                  <label className="block text-sm font-semibold mb-1">
+                    {requiredLabel("City")}
+                  </label>
                   <input
                     value={shipping.city}
                     onChange={(e) => setShipping((s) => ({ ...s, city: e.target.value }))}
@@ -371,7 +350,9 @@ export default function CheckoutPage() {
                 </div>
 
                 <div>
-                  <label className="block text-sm font-semibold mb-1">{requiredLabel("State")}</label>
+                  <label className="block text-sm font-semibold mb-1">
+                    {requiredLabel("State")}
+                  </label>
                   <input
                     value={shipping.state}
                     onChange={(e) => setShipping((s) => ({ ...s, state: e.target.value }))}
@@ -432,14 +413,17 @@ export default function CheckoutPage() {
 
               {saveError && <p className="mt-3 text-sm text-red-600">{saveError}</p>}
               {!isValid && (
-                <p className="mt-3 text-sm text-red-600">Please fill all required fields to continue.</p>
+                <p className="mt-3 text-sm text-red-600">
+                  Please fill all required fields to continue.
+                </p>
               )}
               {cart.items.length === 0 && (
-                <p className="mt-3 text-sm text-red-600">Your cart is empty. Add items to proceed.</p>
+                <p className="mt-3 text-sm text-red-600">
+                  Your cart is empty. Add items to proceed.
+                </p>
               )}
             </section>
 
-            {/* RIGHT: Order summary */}
             <aside className="lg:col-span-2 premium-card p-6 h-fit">
               <h2 className="text-2xl mb-4">Order Summary</h2>
 
@@ -449,7 +433,11 @@ export default function CheckoutPage() {
                 <div className="space-y-4">
                   {cart.items.map((i: any) => (
                     <div key={i.id} className="flex gap-3">
-                      <img src={i.image} className="w-14 h-14 rounded-lg object-cover" alt={i.name} />
+                      <img
+                        src={i.image}
+                        className="w-14 h-14 rounded-lg object-cover"
+                        alt={i.name}
+                      />
                       <div className="flex-1">
                         <div className="flex items-start justify-between gap-4">
                           <div>
