@@ -12,10 +12,7 @@ type SignUpInput = {
 
 type AuthContextType = {
   user: User | null;
-  signIn: (
-    email: string,
-    password: string
-  ) => Promise<{ ok: boolean; error?: string }>;
+  signIn: (email: string, password: string) => Promise<{ ok: boolean; error?: string }>;
   signUp: (input: SignUpInput) => Promise<{ ok: boolean; error?: string }>;
   logout: () => Promise<void>;
 };
