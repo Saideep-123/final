@@ -1,12 +1,19 @@
 "use client";
 
 import { createContext, useContext, useEffect, useState } from "react";
-import { supabase } from "../lib/supabaseClient";
 import type { User } from "@supabase/supabase-js";
+import { supabase } from "../lib/supabaseClient";
+
+type SignUpInput = {
+  email: string;
+  password: string;
+  fullName: string;
+};
 
 type AuthContextType = {
   user: User | null;
-  login: () => Promise<void>;
+  signIn: (email: string, password: string) => Promise<{ ok: boolean; error?: string }>;
+  signUp: (input: SignUpInput) => Promise<{ ok: boolean; error?: string }>;
   logout: () => Promise<void>;
 };
 
@@ -16,9 +23,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
 
   useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => {
-      setUser(data.user ?? null);
-    });
+    supabase.auth.getUser().then(({ data }) => setUser(data.user ?? null));
 
     const {
       data: { subscription },
@@ -29,10 +34,43 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => subscription.unsubscribe();
   }, []);
 
-  const login = async () => {
-    await supabase.auth.signInWithOtp({
-      email: prompt("Enter your email") || "",
-    });
+  const signIn = async (emailRaw: string, password: string) => {
+    const email = emailRaw.trim();
+    if (!email) return { ok: false, error: "Email is required" };
+    if (!password) return { ok: false, error: "Password is required" };
+
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) return { ok: false, error: error.message };
+
+    return { ok: true };
+  };
+
+  const signUp = async ({ email: emailRaw, password, fullName }: SignUpInput) => {
+    const email = emailRaw.trim();
+    const name = fullName.trim();
+
+    if (!email) return { ok: false, error: "Email is required" };
+    if (!password || password.length < 6) return { ok: false, error: "Password must be at least 6 characters" };
+    if (!name) return { ok: false, error: "Full name is required" };
+
+    const { data, error } = await supabase.auth.signUp({ email, password });
+    if (error) return { ok: false, error: error.message };
+
+    // Optional profile table insert (safe to skip if you don't have profiles table yet)
+    // If you created the profiles table, keep this.
+    const userId = data.user?.id;
+    if (userId) {
+      const { error: profileErr } = await supabase.from("profiles").upsert({
+        id: userId,
+        full_name: name,
+      });
+      if (profileErr) {
+        // Don't block signup if profile insert fails
+        console.warn("Profile insert failed:", profileErr.message);
+      }
+    }
+
+    return { ok: true };
   };
 
   const logout = async () => {
@@ -40,7 +78,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, login, logout }}>
+    <AuthContext.Provider value={{ user, signIn, signUp, logout }}>
       {children}
     </AuthContext.Provider>
   );
