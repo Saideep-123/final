@@ -1,10 +1,12 @@
 "use client";
 
-import { MessageCircle, ShoppingCart } from "lucide-react";
+import { MessageCircle, ShoppingCart, User } from "lucide-react";
 import { useCart } from "./CartContext";
+import { useRouter } from "next/navigation";
 
 export default function Navbar() {
   const cart = useCart();
+  const router = useRouter();
 
   const scrollTo = (id: string) => {
     const el = document.getElementById(id);
@@ -14,6 +16,7 @@ export default function Navbar() {
   return (
     <nav className="sticky top-0 z-50 backdrop-blur-md bg-cream/90 border-b border-gold">
       <div className="max-w-7xl mx-auto flex items-center justify-between px-6 py-4">
+        {/* Brand */}
         <button
           className="brand-logo text-3xl text-brown"
           onClick={() => scrollTo("home")}
@@ -21,25 +24,28 @@ export default function Navbar() {
           Konaseema Foods
         </button>
 
+        {/* Menu */}
         <div className="hidden md:flex gap-8 font-semibold">
-          <button className="hover:text-gold" onClick={() => scrollTo("home")}>
-            Home
-          </button>
-          <button className="hover:text-gold" onClick={() => scrollTo("categories")}>
-            Categories
-          </button>
-          <button className="hover:text-gold" onClick={() => scrollTo("products")}>
-            Products
-          </button>
-          <button className="hover:text-gold" onClick={() => scrollTo("about")}>
-            About
-          </button>
-          <button className="hover:text-gold" onClick={() => scrollTo("contact")}>
-            Contact
-          </button>
+          <button onClick={() => scrollTo("home")} className="hover:text-gold">Home</button>
+          <button onClick={() => scrollTo("categories")} className="hover:text-gold">Categories</button>
+          <button onClick={() => scrollTo("products")} className="hover:text-gold">Products</button>
+          <button onClick={() => scrollTo("about")} className="hover:text-gold">About</button>
+          <button onClick={() => scrollTo("contact")} className="hover:text-gold">Contact</button>
         </div>
 
+        {/* Actions */}
         <div className="flex items-center gap-4">
+          {/* LOGIN (restored) */}
+          <button
+            onClick={() => router.push("/login")}
+            className="flex items-center gap-1 text-sm font-semibold hover:text-gold"
+            aria-label="Login"
+          >
+            <User size={18} />
+            Login
+          </button>
+
+          {/* Cart */}
           <button
             className="relative"
             onClick={cart.open}
@@ -53,6 +59,7 @@ export default function Navbar() {
             )}
           </button>
 
+          {/* WhatsApp */}
           <a
             aria-label="WhatsApp"
             className="text-green-700"
