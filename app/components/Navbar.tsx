@@ -21,7 +21,7 @@ export default function Navbar() {
       <nav className="sticky top-0 z-50 backdrop-blur-md bg-cream/90 border-b border-gold">
         <div className="max-w-7xl mx-auto flex items-center justify-between px-6 py-4">
           <button className="brand-logo text-3xl text-brown" onClick={() => scrollTo("home")}>
-            Konaseema Foods
+            Konaseema Specials
           </button>
 
           <div className="hidden md:flex gap-8 font-semibold">
@@ -37,7 +37,7 @@ export default function Navbar() {
               <button
                 type="button"
                 onClick={() => setAuthOpen(true)}
-                className="px-4 py-2 rounded-full border-2 border-blue-600 text-blue-700 font-semibold"
+                className="px-5 py-2 rounded-full border-2 border-blue-600 text-blue-700 font-semibold"
               >
                 Login
               </button>
@@ -45,7 +45,7 @@ export default function Navbar() {
               <button
                 type="button"
                 onClick={logout}
-                className="px-4 py-2 rounded-full border border-[#c9a36a] font-semibold hover:bg-[#f6efe6]"
+                className="px-5 py-2 rounded-full border border-[#d9c4a7] font-semibold hover:bg-[#f6efe6]"
                 title={user.email ?? "Logged in"}
               >
                 Logout
@@ -61,12 +61,7 @@ export default function Navbar() {
               )}
             </button>
 
-            <a
-              aria-label="WhatsApp"
-              className="text-green-700"
-              href="https://wa.me/91XXXXXXXXXX"
-              target="_blank"
-            >
+            <a aria-label="WhatsApp" className="text-green-700" href="https://wa.me/91XXXXXXXXXX" target="_blank">
               <MessageCircle />
             </a>
           </div>
