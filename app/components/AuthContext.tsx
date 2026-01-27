@@ -12,7 +12,10 @@ type SignUpInput = {
 
 type AuthContextType = {
   user: User | null;
-  signIn: (email: string, password: string) => Promise<{ ok: boolean; error?: string }>;
+  signIn: (
+    email: string,
+    password: string
+  ) => Promise<{ ok: boolean; error?: string }>;
   signUp: (input: SignUpInput) => Promise<{ ok: boolean; error?: string }>;
   logout: () => Promise<void>;
 };
@@ -50,26 +53,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const name = fullName.trim();
 
     if (!email) return { ok: false, error: "Email is required" };
-    if (!password || password.length < 6) return { ok: false, error: "Password must be at least 6 characters" };
+    if (!password || password.length < 6)
+      return { ok: false, error: "Password must be at least 6 characters" };
     if (!name) return { ok: false, error: "Full name is required" };
 
-    const { data, error } = await supabase.auth.signUp({ email, password });
+    const { error } = await supabase.auth.signUp({ email, password });
     if (error) return { ok: false, error: error.message };
 
-    // Optional profile table insert (safe to skip if you don't have profiles table yet)
-    // If you created the profiles table, keep this.
-    const userId = data.user?.id;
-    if (userId) {
-      const { error: profileErr } = await supabase.from("profiles").upsert({
-        id: userId,
-        full_name: name,
-      });
-      if (profileErr) {
-        // Don't block signup if profile insert fails
-        console.warn("Profile insert failed:", profileErr.message);
-      }
-    }
-
+    // SQL / profiles storage later (as you requested)
     return { ok: true };
   };
 
