@@ -21,7 +21,7 @@ type Shipping = {
 };
 
 const STORAGE_KEY = "konaseema_shipping_v1";
-const WHATSAPP_NUMBER = "91XXXXXXXXXX"; // replace with your number (no +)
+const WHATSAPP_NUMBER = "91XXXXXXXXXX"; // TODO: replace (no +)
 
 function requiredLabel(text: string) {
   return (
@@ -52,7 +52,6 @@ export default function CheckoutPage() {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
-  // Load saved shipping from localStorage
   useEffect(() => {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
@@ -60,7 +59,6 @@ export default function CheckoutPage() {
     } catch {}
   }, []);
 
-  // Persist shipping to localStorage
   useEffect(() => {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(shipping));
@@ -94,9 +92,10 @@ export default function CheckoutPage() {
   const isValid = Object.keys(errors).length === 0;
 
   const buildWhatsAppMessage = (orderId: string) => {
-    const lines = cart.items.map(
-      (i: any) => `• ${i.name}${i.weight ? ` (${i.weight})` : ""} x${i.qty} = ₹${i.qty * i.price}`
-    );
+    const lines = cart.items.map((i: any) => {
+      const w = i.weight ? ` (${i.weight})` : "";
+      return `• ${i.name}${w} x${i.qty} = ₹${i.qty * i.price}`;
+    });
 
     const shipLines = [
       `Order ID: ${orderId}`,
@@ -104,7 +103,9 @@ export default function CheckoutPage() {
       `Email: ${shipping.email}`,
       `Phone: ${shipping.phone}`,
       `Country: ${shipping.country}`,
-      `Address: ${shipping.address1}${shipping.address2.trim() ? ", " + shipping.address2.trim() : ""}`,
+      `Address: ${shipping.address1}${
+        shipping.address2.trim() ? ", " + shipping.address2.trim() : ""
+      }`,
       `City/State/ZIP: ${shipping.city}, ${shipping.state} ${shipping.zip}`,
       shipping.deliveryNotes.trim() ? `Notes: ${shipping.deliveryNotes.trim()}` : null,
     ].filter(Boolean);
@@ -122,15 +123,22 @@ export default function CheckoutPage() {
     return encodeURIComponent(text);
   };
 
+  /**
+   * Saves:
+   * 1) addresses (your confirmed columns)
+   * 2) orders (must exist with address_id/user_id/subtotal/shipping/total/currency/status/notes)
+   * 3) order_items (minimal columns: order_id/product_id/name/price/qty)
+   */
   const saveOrderToDb = async (): Promise<string> => {
-    setSaveError(null);
-
+    // 0) ensure logged in
     const { data: userData, error: userErr } = await supabase.auth.getUser();
     if (userErr) throw new Error(userErr.message);
     if (!userData.user) throw new Error("Please login to place the order.");
 
     const userId = userData.user.id;
+    console.log("USER ✅", userId);
 
+    // totals
     const subtotal = cart.items.reduce(
       (s: number, it: any) => s + Number(it.price) * Number(it.qty),
       0
@@ -138,7 +146,7 @@ export default function CheckoutPage() {
     const shippingFee = 0;
     const total = subtotal + shippingFee;
 
-    // 1) Address (matches your shown columns)
+    // 1) insert address
     const { data: address, error: addrErr } = await supabase
       .from("addresses")
       .insert({
@@ -156,9 +164,12 @@ export default function CheckoutPage() {
       .select("id")
       .single();
 
-    if (addrErr) throw new Error(addrErr.message);
+    if (addrErr) {
+      console.log("ADDR ERROR FULL:", addrErr);
+      throw new Error(addrErr.message);
+    }
 
-    // 2) Order (requires orders table columns to exist)
+    // 2) insert order
     const { data: order, error: orderErr } = await supabase
       .from("orders")
       .insert({
@@ -174,24 +185,32 @@ export default function CheckoutPage() {
       .select("id")
       .single();
 
-    if (orderErr) throw new Error(orderErr.message);
+    if (orderErr) {
+      console.log("ORDER ERROR FULL:", orderErr);
+      throw new Error(orderErr.message);
+    }
 
-    // 3) Order items (keep only columns that exist for sure)
+    // 3) insert order items (minimal fields to avoid column mismatch)
     const itemsPayload = cart.items.map((i: any) => ({
       order_id: order.id,
       product_id: String(i.id),
       name: i.name,
-      price: i.price,
-      qty: i.qty,
+      price: Number(i.price),
+      qty: Number(i.qty),
     }));
 
     const { error: itemsErr } = await supabase.from("order_items").insert(itemsPayload);
-    if (itemsErr) throw new Error(itemsErr.message);
+    if (itemsErr) {
+      console.log("ITEMS ERROR FULL:", itemsErr);
+      throw new Error(itemsErr.message);
+    }
 
     return String(order.id);
   };
 
   const onSendWhatsApp = async () => {
+    console.log("CLICKED ✅");
+
     setTouched({
       fullName: true,
       email: true,
@@ -207,12 +226,19 @@ export default function CheckoutPage() {
     if (cart.items.length === 0) return;
 
     try {
+      setSaveError(null);
       setSaving(true);
+
       const orderId = await saveOrderToDb();
+
       const msg = buildWhatsAppMessage(orderId);
-      window.open(`https://wa.me/${WHATSAPP_NUMBER}?text=${msg}`, "_blank");
-      // optional: cart.clear();
+      const link = `https://wa.me/${WHATSAPP_NUMBER}?text=${msg}`;
+
+      window.open(link, "_blank");
+      // optional:
+      // cart.clear();
     } catch (e: any) {
+      console.log("SAVE ERROR FULL:", e);
       setSaveError(e?.message || "Failed to save order. Please try again.");
     } finally {
       setSaving(false);
@@ -237,7 +263,7 @@ export default function CheckoutPage() {
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-5 gap-8">
-            {/* LEFT */}
+            {/* LEFT: Delivery form */}
             <section className="lg:col-span-3 premium-card p-6">
               <h2 className="text-2xl mb-4">Delivery Details</h2>
 
@@ -251,6 +277,7 @@ export default function CheckoutPage() {
                     onChange={(e) => setShipping((s) => ({ ...s, fullName: e.target.value }))}
                     onBlur={() => setTouched((t) => ({ ...t, fullName: true }))}
                     className={`${inputBase} ${touched.fullName && errors.fullName ? inputErr : ""}`}
+                    placeholder="Recipient full name"
                   />
                   {touched.fullName && errors.fullName && (
                     <p className="text-sm text-red-600 mt-1">{errors.fullName}</p>
@@ -264,6 +291,7 @@ export default function CheckoutPage() {
                     onChange={(e) => setShipping((s) => ({ ...s, email: e.target.value }))}
                     onBlur={() => setTouched((t) => ({ ...t, email: true }))}
                     className={`${inputBase} ${touched.email && errors.email ? inputErr : ""}`}
+                    placeholder="name@example.com"
                   />
                   {touched.email && errors.email && (
                     <p className="text-sm text-red-600 mt-1">{errors.email}</p>
@@ -279,6 +307,7 @@ export default function CheckoutPage() {
                     onChange={(e) => setShipping((s) => ({ ...s, phone: e.target.value }))}
                     onBlur={() => setTouched((t) => ({ ...t, phone: true }))}
                     className={`${inputBase} ${touched.phone && errors.phone ? inputErr : ""}`}
+                    placeholder="US phone number"
                   />
                   {touched.phone && errors.phone && (
                     <p className="text-sm text-red-600 mt-1">{errors.phone}</p>
@@ -286,12 +315,15 @@ export default function CheckoutPage() {
                 </div>
 
                 <div className="md:col-span-2">
-                  <label className="block text-sm font-semibold mb-1">{requiredLabel("Country")}</label>
+                  <label className="block text-sm font-semibold mb-1">
+                    {requiredLabel("Country")}
+                  </label>
                   <input
                     value={shipping.country}
                     onChange={(e) => setShipping((s) => ({ ...s, country: e.target.value }))}
                     onBlur={() => setTouched((t) => ({ ...t, country: true }))}
                     className={`${inputBase} ${touched.country && errors.country ? inputErr : ""}`}
+                    placeholder="United States"
                   />
                   {touched.country && errors.country && (
                     <p className="text-sm text-red-600 mt-1">{errors.country}</p>
@@ -307,6 +339,7 @@ export default function CheckoutPage() {
                     onChange={(e) => setShipping((s) => ({ ...s, address1: e.target.value }))}
                     onBlur={() => setTouched((t) => ({ ...t, address1: true }))}
                     className={`${inputBase} ${touched.address1 && errors.address1 ? inputErr : ""}`}
+                    placeholder="Street address, house number"
                   />
                   {touched.address1 && errors.address1 && (
                     <p className="text-sm text-red-600 mt-1">{errors.address1}</p>
@@ -319,6 +352,7 @@ export default function CheckoutPage() {
                     value={shipping.address2}
                     onChange={(e) => setShipping((s) => ({ ...s, address2: e.target.value }))}
                     className={inputBase}
+                    placeholder="Apartment, suite, unit (optional)"
                   />
                 </div>
 
@@ -329,6 +363,7 @@ export default function CheckoutPage() {
                     onChange={(e) => setShipping((s) => ({ ...s, city: e.target.value }))}
                     onBlur={() => setTouched((t) => ({ ...t, city: true }))}
                     className={`${inputBase} ${touched.city && errors.city ? inputErr : ""}`}
+                    placeholder="City"
                   />
                   {touched.city && errors.city && (
                     <p className="text-sm text-red-600 mt-1">{errors.city}</p>
@@ -342,6 +377,7 @@ export default function CheckoutPage() {
                     onChange={(e) => setShipping((s) => ({ ...s, state: e.target.value }))}
                     onBlur={() => setTouched((t) => ({ ...t, state: true }))}
                     className={`${inputBase} ${touched.state && errors.state ? inputErr : ""}`}
+                    placeholder="State"
                   />
                   {touched.state && errors.state && (
                     <p className="text-sm text-red-600 mt-1">{errors.state}</p>
@@ -357,6 +393,7 @@ export default function CheckoutPage() {
                     onChange={(e) => setShipping((s) => ({ ...s, zip: e.target.value }))}
                     onBlur={() => setTouched((t) => ({ ...t, zip: true }))}
                     className={`${inputBase} ${touched.zip && errors.zip ? inputErr : ""}`}
+                    placeholder="ZIP code"
                   />
                   {touched.zip && errors.zip && (
                     <p className="text-sm text-red-600 mt-1">{errors.zip}</p>
@@ -369,6 +406,7 @@ export default function CheckoutPage() {
                     value={shipping.deliveryNotes}
                     onChange={(e) => setShipping((s) => ({ ...s, deliveryNotes: e.target.value }))}
                     className={`${inputBase} min-h-[110px]`}
+                    placeholder="Any special instructions (optional)"
                   />
                 </div>
               </div>
@@ -393,9 +431,15 @@ export default function CheckoutPage() {
               </div>
 
               {saveError && <p className="mt-3 text-sm text-red-600">{saveError}</p>}
+              {!isValid && (
+                <p className="mt-3 text-sm text-red-600">Please fill all required fields to continue.</p>
+              )}
+              {cart.items.length === 0 && (
+                <p className="mt-3 text-sm text-red-600">Your cart is empty. Add items to proceed.</p>
+              )}
             </section>
 
-            {/* RIGHT */}
+            {/* RIGHT: Order summary */}
             <aside className="lg:col-span-2 premium-card p-6 h-fit">
               <h2 className="text-2xl mb-4">Order Summary</h2>
 
@@ -421,6 +465,7 @@ export default function CheckoutPage() {
                               className="px-3 py-1 border border-gold rounded-full"
                               onClick={() => cart.dec(i.id)}
                               type="button"
+                              aria-label={`Decrease ${i.name}`}
                             >
                               -
                             </button>
@@ -429,6 +474,7 @@ export default function CheckoutPage() {
                               className="px-3 py-1 border border-gold rounded-full"
                               onClick={() => cart.inc(i.id)}
                               type="button"
+                              aria-label={`Increase ${i.name}`}
                             >
                               +
                             </button>
@@ -446,10 +492,22 @@ export default function CheckoutPage() {
                   ))}
 
                   <div className="border-t border-gold pt-4">
+                    <div className="flex justify-between mb-2">
+                      <span className="opacity-80">Items</span>
+                      <span className="font-semibold">{cart.count}</span>
+                    </div>
                     <div className="flex justify-between text-lg">
                       <span className="opacity-80">Subtotal</span>
                       <span className="font-bold">₹{cart.total}</span>
                     </div>
+
+                    <button
+                      className="w-full mt-4 text-sm underline opacity-80 hover:opacity-100"
+                      onClick={cart.clear}
+                      type="button"
+                    >
+                      Clear cart
+                    </button>
                   </div>
                 </div>
               )}
