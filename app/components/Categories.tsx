@@ -1,7 +1,5 @@
 "use client";
 
-import { motion } from "framer-motion";
-import { Search } from "lucide-react";
 import { CATEGORIES } from "./data";
 
 export default function Categories({
@@ -9,50 +7,40 @@ export default function Categories({
   setActive,
   searchQuery,
   setSearchQuery,
-}: {
-  active: string;
-  setActive: (v: string) => void;
-  searchQuery: string;
-  setSearchQuery: (v: string) => void;
-}) {
+}: any) {
   return (
-    <section id="categories" className="px-6 py-16">
+    <section className="px-6 pt-20 pb-14">
       <div className="max-w-7xl mx-auto">
-        <div className="mb-10 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-          <div>
-            <h2 className="text-4xl mb-2">Shop by Category</h2>
-            <p className="opacity-75">Choose sweets, snacks, pickles, or gift boxes.</p>
-          </div>
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-6 mb-8">
+          {/* PREMIUM HEADING */}
+          <h2 className="text-[36px] font-semibold tracking-tight">
+            Shop by Category
+          </h2>
 
-          {/* Search (right side) */}
-          <div className="w-full md:w-[380px]">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 opacity-60" size={18} />
-              <input
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search products…"
-                className="w-full pl-10 pr-4 py-3 rounded-2xl border border-gold bg-[#fffaf2] focus:outline-none focus:ring-2 focus:ring-gold/40"
-                aria-label="Search products"
-              />
-            </div>
-            <div className="mt-2 text-xs opacity-60">Tip: try “kaja”, “pickle”, or “gift”.</div>
-          </div>
+          {/* SEARCH */}
+          <input
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search products"
+            className="w-full md:w-[320px] px-4 py-2 rounded-full border border-[#e8dccb] focus:outline-none"
+          />
         </div>
 
+        {/* CATEGORY PILLS */}
         <div className="flex flex-wrap gap-3">
-          {CATEGORIES.map((c) => (
-            <motion.button
+          {CATEGORIES.map((c: string) => (
+            <button
               key={c}
-              whileHover={{ y: -2 }}
-              className={`px-5 py-2 rounded-full border border-gold ${
-                active === c ? "bg-[#3b2417] text-[#fffaf2]" : "bg-transparent hover:bg-gold/10"
-              }`}
               onClick={() => setActive(c)}
-              type="button"
+              className={`px-5 py-2 rounded-full text-[14px] tracking-wide transition
+                ${
+                  active === c
+                    ? "bg-[#3b2417] text-white"
+                    : "border border-[#c9a36a] hover:bg-[#f6efe6]"
+                }`}
             >
               {c}
-            </motion.button>
+            </button>
           ))}
         </div>
       </div>
