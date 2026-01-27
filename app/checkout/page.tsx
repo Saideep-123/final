@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Navbar from "../components/Navbar";
 import Footer from "../components/Footer";
 import { useCart } from "../components/CartContext";
+import { supabase } from "../lib/supabaseClient";
 
 type Shipping = {
   fullName: string;
@@ -20,6 +21,9 @@ type Shipping = {
 };
 
 const STORAGE_KEY = "konaseema_shipping_v1";
+
+// NOTE: replace with your WhatsApp business number (country code + number, no +)
+const WHATSAPP_NUMBER = "91XXXXXXXXXX";
 
 function requiredLabel(text: string) {
   return (
@@ -47,6 +51,8 @@ export default function CheckoutPage() {
   });
 
   const [touched, setTouched] = useState<Record<string, boolean>>({});
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   useEffect(() => {
     try {
@@ -82,12 +88,13 @@ export default function CheckoutPage() {
 
   const isValid = Object.keys(errors).length === 0;
 
-  const orderMessage = () => {
+  const buildWhatsAppMessage = (orderId: number) => {
     const lines = cart.items.map(
-      (i) => `• ${i.name} (${i.weight}) x${i.qty} = ₹${i.qty * i.price}`
+      (i: any) => `• ${i.name} (${i.weight}) x${i.qty} = ₹${i.qty * i.price}`
     );
 
     const shipLines = [
+      `Order ID: ${orderId}`,
       `Name: ${shipping.fullName}`,
       `Email: ${shipping.email}`,
       `Phone: ${shipping.phone}`,
@@ -108,8 +115,104 @@ export default function CheckoutPage() {
     ].join("\n");
   };
 
-  // NOTE: replace with your WhatsApp business number (country code + number, no +)
-  const waLink = `https://wa.me/91XXXXXXXXXX?text=${encodeURIComponent(orderMessage())}`;
+  const saveOrderToDb = async () => {
+    setSaveError(null);
+
+    // Require login because RLS uses auth.uid()
+    const { data: userData, error: userErr } = await supabase.auth.getUser();
+    if (userErr) throw new Error(userErr.message);
+    if (!userData.user) throw new Error("Please login to place the order.");
+
+    const userId = userData.user.id;
+
+    // Totals
+    const subtotal = cart.items.reduce((s: number, it: any) => s + Number(it.price) * Number(it.qty), 0);
+    const shippingFee = 0;
+    const total = subtotal + shippingFee;
+
+    // 1) Insert address
+    const { data: addr, error: addrErr } = await supabase
+      .from("addresses")
+      .insert({
+        user_id: userId,
+        full_name: shipping.fullName,
+        email: shipping.email,
+        phone: shipping.phone,
+        address_line1: shipping.address1,
+        address_line2: shipping.address2 ? shipping.address2 : null,
+        city: shipping.city,
+        state: shipping.state,
+        postal_code: shipping.zip,
+        country: shipping.country || "United States",
+      })
+      .select("id")
+      .single();
+
+    if (addrErr) throw new Error(addrErr.message);
+
+    // 2) Insert order
+    const { data: order, error: orderErr } = await supabase
+      .from("orders")
+      .insert({
+        user_id: userId,
+        address_id: addr.id,
+        currency: "INR",
+        status: "pending",
+        subtotal,
+        shipping: shippingFee,
+        total,
+        notes: shipping.deliveryNotes ? shipping.deliveryNotes : null,
+      })
+      .select("id")
+      .single();
+
+    if (orderErr) throw new Error(orderErr.message);
+
+    // 3) Insert order items
+    const itemsPayload = cart.items.map((i: any) => ({
+      order_id: order.id,
+      product_id: i.id,
+      name: i.name,
+      price: i.price,
+      qty: i.qty,
+      image: i.image ?? null,
+      weight: i.weight ?? null,
+      category: i.category ?? null,
+    }));
+
+    const { error: itemsErr } = await supabase.from("order_items").insert(itemsPayload);
+    if (itemsErr) throw new Error(itemsErr.message);
+
+    return order.id as number;
+  };
+
+  const onSendWhatsApp = async () => {
+    setTouched({
+      fullName: true,
+      email: true,
+      phone: true,
+      country: true,
+      address1: true,
+      city: true,
+      state: true,
+      zip: true,
+    });
+
+    if (!isValid) return;
+    if (cart.items.length === 0) return;
+
+    try {
+      setSaving(true);
+      const orderId = await saveOrderToDb();
+      const msg = buildWhatsAppMessage(orderId);
+      const waLink = `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(msg)}`;
+      window.open(waLink, "_blank");
+    } catch (e: any) {
+      setSaveError(e?.message || "Failed to save order. Please try again.");
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const inputBase =
     "w-full px-4 py-3 rounded-2xl border border-gold bg-[#fffaf2] focus:outline-none focus:ring-2 focus:ring-gold/40";
@@ -294,29 +397,19 @@ export default function CheckoutPage() {
 
                 <button
                   className="btn-primary w-full sm:flex-1"
-                  onClick={() => {
-                    setTouched({
-                      fullName: true,
-                      email: true,
-                      phone: true,
-                      country: true,
-                      address1: true,
-                      city: true,
-                      state: true,
-                      zip: true,
-                    });
-
-                    if (!isValid) return;
-                    if (cart.items.length === 0) return;
-
-                    window.open(waLink, "_blank");
-                  }}
+                  onClick={onSendWhatsApp}
                   type="button"
-                  disabled={!isValid || cart.items.length === 0}
+                  disabled={!isValid || cart.items.length === 0 || saving}
                 >
-                  Send Order on WhatsApp
+                  {saving ? "Saving Order..." : "Send Order on WhatsApp"}
                 </button>
               </div>
+
+              {saveError && (
+                <p className="mt-3 text-sm text-red-600">
+                  {saveError}
+                </p>
+              )}
 
               {!isValid && (
                 <p className="mt-3 text-sm text-red-600">
@@ -338,9 +431,13 @@ export default function CheckoutPage() {
                 <p className="opacity-70">No items yet.</p>
               ) : (
                 <div className="space-y-4">
-                  {cart.items.map((i) => (
+                  {cart.items.map((i: any) => (
                     <div key={i.id} className="flex gap-3">
-                      <img src={i.image} className="w-14 h-14 rounded-lg object-cover" alt={i.name} />
+                      <img
+                        src={i.image}
+                        className="w-14 h-14 rounded-lg object-cover"
+                        alt={i.name}
+                      />
                       <div className="flex-1">
                         <div className="flex items-start justify-between gap-4">
                           <div>
