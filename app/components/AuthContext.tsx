@@ -57,7 +57,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const { error } = await supabase.auth.signUp({ email, password });
     if (error) return { ok: false, error: error.message };
 
-    // SQL / profiles storage later (as you requested)
+    // SQL storage later (profiles / addresses / orders)
     return { ok: true };
   };
 
