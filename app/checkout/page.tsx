@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
 import Navbar from "../components/Navbar";
 import Footer from "../components/Footer";
 import { useCart } from "../components/CartContext";
@@ -22,23 +21,17 @@ type Shipping = {
 
 const STORAGE_KEY = "konaseema_shipping_v1";
 
-function requiredLabel(text: string) {
-  return (
-    <span className="inline-flex items-center gap-1">
-      {text} <span className="text-red-600">*</span>
-    </span>
-  );
-}
+// ✅ change this
+const WHATSAPP_NUMBER = "91XXXXXXXXXX"; // countrycode + number, no +
 
 export default function CheckoutPage() {
   const cart = useCart();
-  const router = useRouter();
 
   const [shipping, setShipping] = useState<Shipping>({
     fullName: "",
     email: "",
     phone: "",
-    country: "United States",
+    country: "India",
     address1: "",
     address2: "",
     city: "",
@@ -91,24 +84,41 @@ export default function CheckoutPage() {
 
   const isValid = Object.keys(errors).length === 0;
 
-  /**
-   * Saves:
-   * 1) addresses
-   * 2) orders
-   * 3) order_items
-   *
-   * IMPORTANT:
-   * - Your DB must have these tables/columns matching what we insert below.
-   * - RLS must allow INSERT for logged-in user (auth.uid()).
-   */
+  const buildWhatsAppMessage = (orderId: string) => {
+    const lines = cart.items.map(
+      (i: any) => `• ${i.name} (${i.weight || ""}) x${i.qty} = ₹${i.qty * i.price}`
+    );
+
+    return [
+      `Hi Konaseema Foods, I want to place an order.`,
+      ``,
+      `Order ID: ${orderId}`,
+      ``,
+      `Customer: ${shipping.fullName}`,
+      `Phone: ${shipping.phone}`,
+      `Email: ${shipping.email}`,
+      ``,
+      `Address: ${shipping.address1}${shipping.address2 ? ", " + shipping.address2 : ""}`,
+      `${shipping.city}, ${shipping.state} - ${shipping.zip}`,
+      `${shipping.country}`,
+      shipping.deliveryNotes ? `` : "",
+      shipping.deliveryNotes ? `Notes: ${shipping.deliveryNotes}` : "",
+      ``,
+      `Items:`,
+      ...lines,
+      ``,
+      `Total: ₹${cart.total}`,
+    ]
+      .filter(Boolean)
+      .join("\n");
+  };
+
   const saveOrderToDb = async (): Promise<string> => {
-    // 0) must be logged in
     const { data: userData, error: userErr } = await supabase.auth.getUser();
     if (userErr) throw new Error(userErr.message);
     if (!userData.user) throw new Error("Please login to place the order.");
     const userId = userData.user.id;
 
-    // totals
     const subtotal = cart.items.reduce(
       (s: number, it: any) => s + Number(it.price) * Number(it.qty),
       0
@@ -116,7 +126,6 @@ export default function CheckoutPage() {
     const shippingFee = 0;
     const total = subtotal + shippingFee;
 
-    // 1) insert address (matches your shown columns)
     const { data: address, error: addrErr } = await supabase
       .from("addresses")
       .insert({
@@ -129,17 +138,13 @@ export default function CheckoutPage() {
         city: shipping.city.trim(),
         state: shipping.state.trim(),
         postal_code: shipping.zip.trim(),
-        country: shipping.country.trim() || "United States",
+        country: shipping.country.trim() || "India",
       })
       .select("id")
       .single();
 
-    if (addrErr) {
-      console.log("ADDR ERROR FULL:", addrErr);
-      throw new Error(addrErr.message);
-    }
+    if (addrErr) throw new Error(addrErr.message);
 
-    // 2) insert order (your table must have these columns)
     const { data: order, error: orderErr } = await supabase
       .from("orders")
       .insert({
@@ -155,12 +160,8 @@ export default function CheckoutPage() {
       .select("id")
       .single();
 
-    if (orderErr) {
-      console.log("ORDER ERROR FULL:", orderErr);
-      throw new Error(orderErr.message);
-    }
+    if (orderErr) throw new Error(orderErr.message);
 
-    // 3) insert order items (keep minimal to avoid column mismatch)
     const itemsPayload = cart.items.map((i: any) => ({
       order_id: order.id,
       product_id: String(i.id),
@@ -170,17 +171,12 @@ export default function CheckoutPage() {
     }));
 
     const { error: itemsErr } = await supabase.from("order_items").insert(itemsPayload);
-
-    if (itemsErr) {
-      console.log("ITEMS ERROR FULL:", itemsErr);
-      throw new Error(itemsErr.message);
-    }
+    if (itemsErr) throw new Error(itemsErr.message);
 
     return String(order.id);
   };
 
-  // ✅ TEST MODE: Save only, NO WhatsApp open
-  const onSendOrder = async () => {
+  const onPlaceOrder = async () => {
     setTouched({
       fullName: true,
       email: true,
@@ -201,13 +197,13 @@ export default function CheckoutPage() {
       setSaving(true);
 
       const orderId = await saveOrderToDb();
-      setSuccessMsg(`✅ Order saved to database. Order ID: ${orderId}`);
+      setSuccessMsg(`✅ Saved. Order ID: ${orderId}`);
 
-      // optional: clear cart after save
-      // cart.clear();
+      const msg = buildWhatsAppMessage(orderId);
+      const url = `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(msg)}`;
+      window.open(url, "_blank");
     } catch (e: any) {
-      console.log("SAVE ERROR FULL:", e);
-      setSaveError(e?.message || "Failed to save order. Please try again.");
+      setSaveError(e?.message || "Failed to save order.");
     } finally {
       setSaving(false);
     }
@@ -217,295 +213,118 @@ export default function CheckoutPage() {
     "w-full px-4 py-3 rounded-2xl border border-gold bg-[#fffaf2] focus:outline-none focus:ring-2 focus:ring-gold/40";
   const inputErr = "border-red-400 focus:ring-red-200";
 
+  const showErr = (k: keyof Shipping) => touched[k] && errors[k];
+
   return (
     <>
       <Navbar />
       <main className="px-6 py-10">
-        <div className="max-w-7xl mx-auto">
-          <div className="mb-8">
-            <h1 className="text-4xl mb-2">Checkout</h1>
-            <p className="opacity-75">
-              Test mode: we will only save the order to Supabase and show Order ID. Required
-              fields are marked with <span className="text-red-600">*</span>.
-            </p>
-          </div>
+        <div className="max-w-4xl mx-auto">
+          <h1 className="text-4xl mb-2">Checkout</h1>
+          <p className="opacity-75 mb-8">Fill delivery details → we save to Supabase → open WhatsApp.</p>
 
-          <div className="grid grid-cols-1 lg:grid-cols-5 gap-8">
-            {/* LEFT: Delivery form */}
-            <section className="lg:col-span-3 premium-card p-6">
-              <h2 className="text-2xl mb-4">Delivery Details</h2>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="md:col-span-2">
-                  <label className="block text-sm font-semibold mb-1">
-                    {requiredLabel("Full Name")}
-                  </label>
-                  <input
-                    value={shipping.fullName}
-                    onChange={(e) => setShipping((s) => ({ ...s, fullName: e.target.value }))}
-                    onBlur={() => setTouched((t) => ({ ...t, fullName: true }))}
-                    className={`${inputBase} ${touched.fullName && errors.fullName ? inputErr : ""}`}
-                    placeholder="Recipient full name"
-                  />
-                  {touched.fullName && errors.fullName && (
-                    <p className="text-sm text-red-600 mt-1">{errors.fullName}</p>
-                  )}
-                </div>
-
-                <div>
-                  <label className="block text-sm font-semibold mb-1">
-                    {requiredLabel("Email")}
-                  </label>
-                  <input
-                    value={shipping.email}
-                    onChange={(e) => setShipping((s) => ({ ...s, email: e.target.value }))}
-                    onBlur={() => setTouched((t) => ({ ...t, email: true }))}
-                    className={`${inputBase} ${touched.email && errors.email ? inputErr : ""}`}
-                    placeholder="name@example.com"
-                  />
-                  {touched.email && errors.email && (
-                    <p className="text-sm text-red-600 mt-1">{errors.email}</p>
-                  )}
-                </div>
-
-                <div>
-                  <label className="block text-sm font-semibold mb-1">
-                    {requiredLabel("Mobile / Phone")}
-                  </label>
-                  <input
-                    value={shipping.phone}
-                    onChange={(e) => setShipping((s) => ({ ...s, phone: e.target.value }))}
-                    onBlur={() => setTouched((t) => ({ ...t, phone: true }))}
-                    className={`${inputBase} ${touched.phone && errors.phone ? inputErr : ""}`}
-                    placeholder="US phone number"
-                  />
-                  {touched.phone && errors.phone && (
-                    <p className="text-sm text-red-600 mt-1">{errors.phone}</p>
-                  )}
-                </div>
-
-                <div className="md:col-span-2">
-                  <label className="block text-sm font-semibold mb-1">
-                    {requiredLabel("Country")}
-                  </label>
-                  <input
-                    value={shipping.country}
-                    onChange={(e) => setShipping((s) => ({ ...s, country: e.target.value }))}
-                    onBlur={() => setTouched((t) => ({ ...t, country: true }))}
-                    className={`${inputBase} ${touched.country && errors.country ? inputErr : ""}`}
-                    placeholder="United States"
-                  />
-                  {touched.country && errors.country && (
-                    <p className="text-sm text-red-600 mt-1">{errors.country}</p>
-                  )}
-                </div>
-
-                <div className="md:col-span-2">
-                  <label className="block text-sm font-semibold mb-1">
-                    {requiredLabel("Address Line 1")}
-                  </label>
-                  <input
-                    value={shipping.address1}
-                    onChange={(e) => setShipping((s) => ({ ...s, address1: e.target.value }))}
-                    onBlur={() => setTouched((t) => ({ ...t, address1: true }))}
-                    className={`${inputBase} ${touched.address1 && errors.address1 ? inputErr : ""}`}
-                    placeholder="Street address, house number"
-                  />
-                  {touched.address1 && errors.address1 && (
-                    <p className="text-sm text-red-600 mt-1">{errors.address1}</p>
-                  )}
-                </div>
-
-                <div className="md:col-span-2">
-                  <label className="block text-sm font-semibold mb-1">Address Line 2</label>
-                  <input
-                    value={shipping.address2}
-                    onChange={(e) => setShipping((s) => ({ ...s, address2: e.target.value }))}
-                    className={inputBase}
-                    placeholder="Apartment, suite, unit (optional)"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-semibold mb-1">
-                    {requiredLabel("City")}
-                  </label>
-                  <input
-                    value={shipping.city}
-                    onChange={(e) => setShipping((s) => ({ ...s, city: e.target.value }))}
-                    onBlur={() => setTouched((t) => ({ ...t, city: true }))}
-                    className={`${inputBase} ${touched.city && errors.city ? inputErr : ""}`}
-                    placeholder="City"
-                  />
-                  {touched.city && errors.city && (
-                    <p className="text-sm text-red-600 mt-1">{errors.city}</p>
-                  )}
-                </div>
-
-                <div>
-                  <label className="block text-sm font-semibold mb-1">
-                    {requiredLabel("State")}
-                  </label>
-                  <input
-                    value={shipping.state}
-                    onChange={(e) => setShipping((s) => ({ ...s, state: e.target.value }))}
-                    onBlur={() => setTouched((t) => ({ ...t, state: true }))}
-                    className={`${inputBase} ${touched.state && errors.state ? inputErr : ""}`}
-                    placeholder="State"
-                  />
-                  {touched.state && errors.state && (
-                    <p className="text-sm text-red-600 mt-1">{errors.state}</p>
-                  )}
-                </div>
-
-                <div className="md:col-span-2">
-                  <label className="block text-sm font-semibold mb-1">
-                    {requiredLabel("ZIP / Postal Code")}
-                  </label>
-                  <input
-                    value={shipping.zip}
-                    onChange={(e) => setShipping((s) => ({ ...s, zip: e.target.value }))}
-                    onBlur={() => setTouched((t) => ({ ...t, zip: true }))}
-                    className={`${inputBase} ${touched.zip && errors.zip ? inputErr : ""}`}
-                    placeholder="ZIP code"
-                  />
-                  {touched.zip && errors.zip && (
-                    <p className="text-sm text-red-600 mt-1">{errors.zip}</p>
-                  )}
-                </div>
-
-                <div className="md:col-span-2">
-                  <label className="block text-sm font-semibold mb-1">Delivery Notes</label>
-                  <textarea
-                    value={shipping.deliveryNotes}
-                    onChange={(e) =>
-                      setShipping((s) => ({ ...s, deliveryNotes: e.target.value }))
-                    }
-                    className={`${inputBase} min-h-[110px]`}
-                    placeholder="Any special instructions (optional)"
-                  />
-                </div>
+          <section className="premium-card p-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <Field
+                label="Full Name *"
+                value={shipping.fullName}
+                onChange={(v) => setShipping({ ...shipping, fullName: v })}
+                className={`${inputBase} ${showErr("fullName") ? inputErr : ""}`}
+              />
+              <Field
+                label="Email *"
+                value={shipping.email}
+                onChange={(v) => setShipping({ ...shipping, email: v })}
+                className={`${inputBase} ${showErr("email") ? inputErr : ""}`}
+              />
+              <Field
+                label="Phone *"
+                value={shipping.phone}
+                onChange={(v) => setShipping({ ...shipping, phone: v })}
+                className={`${inputBase} ${showErr("phone") ? inputErr : ""}`}
+              />
+              <Field
+                label="Country *"
+                value={shipping.country}
+                onChange={(v) => setShipping({ ...shipping, country: v })}
+                className={`${inputBase} ${showErr("country") ? inputErr : ""}`}
+              />
+              <Field
+                label="Address Line 1 *"
+                value={shipping.address1}
+                onChange={(v) => setShipping({ ...shipping, address1: v })}
+                className={`${inputBase} ${showErr("address1") ? inputErr : ""}`}
+              />
+              <Field
+                label="Address Line 2"
+                value={shipping.address2}
+                onChange={(v) => setShipping({ ...shipping, address2: v })}
+                className={inputBase}
+              />
+              <Field
+                label="City *"
+                value={shipping.city}
+                onChange={(v) => setShipping({ ...shipping, city: v })}
+                className={`${inputBase} ${showErr("city") ? inputErr : ""}`}
+              />
+              <Field
+                label="State *"
+                value={shipping.state}
+                onChange={(v) => setShipping({ ...shipping, state: v })}
+                className={`${inputBase} ${showErr("state") ? inputErr : ""}`}
+              />
+              <Field
+                label="ZIP / Postal *"
+                value={shipping.zip}
+                onChange={(v) => setShipping({ ...shipping, zip: v })}
+                className={`${inputBase} ${showErr("zip") ? inputErr : ""}`}
+              />
+              <div className="md:col-span-2">
+                <label className="block text-sm font-semibold mb-1">Delivery Notes</label>
+                <textarea
+                  className={`${inputBase} min-h-[110px]`}
+                  value={shipping.deliveryNotes}
+                  onChange={(e) => setShipping({ ...shipping, deliveryNotes: e.target.value })}
+                />
               </div>
+            </div>
 
-              <div className="mt-6 flex flex-col sm:flex-row gap-3">
-                <button
-                  className="btn-primary bg-[#3b2417] hover:bg-[#2d1a10] w-full sm:w-auto"
-                  onClick={() => router.push("/")}
-                  type="button"
-                >
-                  Back to Shop
-                </button>
+            {saveError && <div className="mt-4 text-sm text-red-600">{saveError}</div>}
+            {successMsg && <div className="mt-4 text-sm text-green-700">{successMsg}</div>}
 
-                <button
-                  className="btn-primary w-full sm:flex-1"
-                  onClick={onSendOrder}
-                  type="button"
-                  disabled={!isValid || cart.items.length === 0 || saving}
-                >
-                  {saving ? "Saving Order..." : "Save Order (Test Mode)"}
-                </button>
-              </div>
+            <button
+              className="btn-primary mt-6 w-full"
+              onClick={onPlaceOrder}
+              disabled={saving || cart.items.length === 0}
+              type="button"
+            >
+              {saving ? "Saving..." : `Place Order (₹${cart.total})`}
+            </button>
 
-              {successMsg && (
-                <p className="mt-3 text-sm text-green-700 font-semibold">{successMsg}</p>
-              )}
-              {saveError && <p className="mt-3 text-sm text-red-600">{saveError}</p>}
-
-              {!isValid && (
-                <p className="mt-3 text-sm text-red-600">
-                  Please fill all required fields to continue.
-                </p>
-              )}
-              {cart.items.length === 0 && (
-                <p className="mt-3 text-sm text-red-600">
-                  Your cart is empty. Add items to proceed.
-                </p>
-              )}
-            </section>
-
-            {/* RIGHT: Order summary */}
-            <aside className="lg:col-span-2 premium-card p-6 h-fit">
-              <h2 className="text-2xl mb-4">Order Summary</h2>
-
-              {cart.items.length === 0 ? (
-                <p className="opacity-70">No items yet.</p>
-              ) : (
-                <div className="space-y-4">
-                  {cart.items.map((i: any) => (
-                    <div key={i.id} className="flex gap-3">
-                      <img
-                        src={i.image}
-                        className="w-14 h-14 rounded-lg object-cover"
-                        alt={i.name}
-                      />
-                      <div className="flex-1">
-                        <div className="flex items-start justify-between gap-4">
-                          <div>
-                            <div className="font-semibold">{i.name}</div>
-                            <div className="text-sm opacity-70">{i.weight}</div>
-                          </div>
-                          <div className="font-semibold">₹{i.qty * i.price}</div>
-                        </div>
-
-                        <div className="mt-2 flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            <button
-                              className="px-3 py-1 border border-gold rounded-full"
-                              onClick={() => cart.dec(i.id)}
-                              type="button"
-                              aria-label={`Decrease ${i.name}`}
-                            >
-                              -
-                            </button>
-                            <span className="min-w-[24px] text-center font-semibold">
-                              {i.qty}
-                            </span>
-                            <button
-                              className="px-3 py-1 border border-gold rounded-full"
-                              onClick={() => cart.inc(i.id)}
-                              type="button"
-                              aria-label={`Increase ${i.name}`}
-                            >
-                              +
-                            </button>
-                          </div>
-                          <button
-                            className="text-sm underline opacity-80 hover:opacity-100"
-                            onClick={() => cart.remove(i.id)}
-                            type="button"
-                          >
-                            Delete
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-
-                  <div className="border-t border-gold pt-4">
-                    <div className="flex justify-between mb-2">
-                      <span className="opacity-80">Items</span>
-                      <span className="font-semibold">{cart.count}</span>
-                    </div>
-                    <div className="flex justify-between text-lg">
-                      <span className="opacity-80">Subtotal</span>
-                      <span className="font-bold">₹{cart.total}</span>
-                    </div>
-
-                    <button
-                      className="w-full mt-4 text-sm underline opacity-80 hover:opacity-100"
-                      onClick={cart.clear}
-                      type="button"
-                    >
-                      Clear cart
-                    </button>
-                  </div>
-                </div>
-              )}
-            </aside>
-          </div>
+            {cart.items.length === 0 && <div className="mt-3 text-sm opacity-70">Your cart is empty.</div>}
+          </section>
         </div>
       </main>
       <Footer />
     </>
+  );
+}
+
+function Field({
+  label,
+  value,
+  onChange,
+  className,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  className: string;
+}) {
+  return (
+    <label className="block">
+      <div className="text-sm font-semibold mb-1">{label}</div>
+      <input className={className} value={value} onChange={(e) => onChange(e.target.value)} />
+    </label>
   );
 }
