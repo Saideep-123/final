@@ -176,20 +176,30 @@ export default function CheckoutPage() {
     return String(order.id);
   };
 
-  const onPlaceOrder = async () => {
-  try {
-    // 🔎 PROVE which Supabase project you are hitting
-    console.log("SUPABASE URL:", process.env.NEXT_PUBLIC_SUPABASE_URL);
+const { data: userData } = await supabase.auth.getUser();
+const userId = userData?.user?.id ?? null;
 
-    const { data: userData } = await supabase.auth.getUser();
-    const userId = userData?.user?.id ?? null;
+const payload = {
+  at: new Date().toISOString(),
+  shipping,
+  cartItems,
+  // you can include invalid fields too — it will still save
+};
 
-    const payload = {
-      debug: "attempt_insert",
-      at: new Date().toISOString(),
-      shipping,
-      cart_items: cartItems,
-    };
+const { data: attemptId, error } = await supabase.rpc("log_order_attempt", {
+  p_payload: payload,
+  p_user_id: userId,
+});
+
+if (error) {
+  console.error("RPC failed:", error);
+  alert(error.message);
+  return;
+}
+
+console.log("Saved attempt:", attemptId);
+alert(`Saved to DB. Attempt ID: ${attemptId}`);
+
 
     // 🔎 PROBE (optional but useful)
     const probe = await supabase
