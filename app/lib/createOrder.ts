@@ -2,7 +2,7 @@
 import { supabase } from "./supabaseClient";
 
 export type CartItem = {
-  id: string; // ✅ changed from number -> string to match CartContext
+  id: string;
   name: string;
   price: number;
   qty: number;
@@ -41,7 +41,6 @@ export async function createOrderInDb(args: {
   const tax = 0;
   const total = subtotal + shippingFee + tax;
 
-  // 1) address
   const { data: address, error: addrErr } = await supabase
     .from("addresses")
     .insert({
@@ -61,7 +60,6 @@ export async function createOrderInDb(args: {
 
   if (addrErr) throw new Error(addrErr.message);
 
-  // 2) order
   const { data: order, error: orderErr } = await supabase
     .from("orders")
     .insert({
@@ -79,10 +77,9 @@ export async function createOrderInDb(args: {
 
   if (orderErr) throw new Error(orderErr.message);
 
-  // 3) order items
   const itemsPayload = args.items.map((i) => ({
     order_id: order.id,
-    product_id: i.id, // ✅ keep as string
+    product_id: i.id,
     name: i.name,
     price: Number(i.price),
     qty: Number(i.qty),
@@ -92,4 +89,35 @@ export async function createOrderInDb(args: {
   if (itemsErr) throw new Error(itemsErr.message);
 
   return { orderId: String(order.id), total };
+}
+
+/**
+ * ✅ Kept for UI compatibility with CheckoutWhatsApp.tsx
+ * This only builds a message string; it does not place orders by WhatsApp.
+ */
+export function buildWhatsAppOrderMessage(params: {
+  items: CartItem[];
+  total: number;
+  shipping?: Partial<ShippingPayload>;
+}) {
+  const lines: string[] = [];
+  lines.push("Hi! I need help with my order.");
+  lines.push("");
+  lines.push("Items:");
+  params.items.forEach((it) => {
+    lines.push(`- ${it.name} x${it.qty} (₹${it.price})`);
+  });
+  lines.push("");
+  lines.push(`Total: ₹${params.total}`);
+
+  // Optional shipping summary (keep minimal)
+  const s = params.shipping;
+  if (s?.full_name || s?.phone) {
+    lines.push("");
+    lines.push("Customer:");
+    if (s.full_name) lines.push(`Name: ${s.full_name}`);
+    if (s.phone) lines.push(`Phone: ${s.phone}`);
+  }
+
+  return lines.join("\n");
 }
