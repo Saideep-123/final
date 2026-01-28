@@ -1,8 +1,14 @@
+// app/components/CheckoutWhatsApp.tsx
 "use client";
 
 import { useState } from "react";
 import { useCart } from "./CartContext";
-import { buildWhatsAppOrderMessage, createOrderInDb } from "../lib/createOrder";
+import {
+  buildWhatsAppOrderMessage,
+  createOrderInDb,
+  type CreateOrderResult,
+  type ShippingPayload,
+} from "../lib/createOrder";
 
 const WHATSAPP_NUMBER = "91XXXXXXXXXX"; // change this
 
@@ -18,18 +24,26 @@ export default function CheckoutWhatsApp() {
     city: "",
     state: "",
     postal_code: "",
-    country: "US",
+    country: "",
   });
 
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
 
   const required = (v: string) => (v || "").trim().length > 0;
 
-  const onSend = async () => {
-    setErr(null);
+  const openWhatsAppContact = (msg: string) => {
+    const cleanNumber = WHATSAPP_NUMBER.replace(/[^\d]/g, "");
+    const url = `https://wa.me/${cleanNumber}?text=${encodeURIComponent(msg)}`;
+    window.open(url, "_blank", "noopener,noreferrer");
+  };
 
-    // Required fields
+  const onSubmit = async () => {
+    setErr(null);
+    setSuccess(null);
+
+    // basic validation
     if (
       !required(form.full_name) ||
       !required(form.email) ||
@@ -45,87 +59,143 @@ export default function CheckoutWhatsApp() {
     }
 
     if (!cart.items || cart.items.length === 0) {
-      setErr("Cart is empty.");
+      setErr("Your cart is empty.");
       return;
     }
 
     setLoading(true);
-    const res = await createOrderInDb({
-      items: cart.items,
-      shipping: {
-        full_name: form.full_name,
-        email: form.email,
-        phone: form.phone,
-        address_line1: form.address_line1,
-        address_line2: form.address_line2 || undefined,
-        city: form.city,
-        state: form.state,
-        postal_code: form.postal_code,
-        country: form.country,
-      },
+
+    const shipping: ShippingPayload = {
+      full_name: form.full_name.trim(),
+      email: form.email.trim(),
+      phone: form.phone.trim(),
+      address_line1: form.address_line1.trim(),
+      address_line2: form.address_line2.trim() ? form.address_line2.trim() : null,
+      city: form.city.trim(),
+      state: form.state.trim(),
+      postal_code: form.postal_code.trim(),
+      country: form.country.trim(),
+    };
+
+    // normalize ids to string to avoid type conflicts
+    const itemsNormalized = cart.items.map((it: any) => ({
+      id: String(it.id),
+      name: String(it.name),
+      price: Number(it.price),
+      qty: Number(it.qty),
+    }));
+
+    const res: CreateOrderResult = await createOrderInDb({
+      items: itemsNormalized,
+      shipping,
       currency: "INR",
     });
+
     setLoading(false);
 
+    // ✅ Proper union narrowing (fixes your exact build error)
     if (!res.ok) {
       setErr(res.error);
       return;
     }
 
-    const msg = buildWhatsAppOrderMessage({
-      orderId: res.orderId,
-      items: cart.items,
-      shipping: {
-        full_name: form.full_name,
-        email: form.email,
-        phone: form.phone,
-        address_line1: form.address_line1,
-        address_line2: form.address_line2 || undefined,
-        city: form.city,
-        state: form.state,
-        postal_code: form.postal_code,
-        country: form.country,
-      },
-      totals: res.totals,
-    });
+    setSuccess(`Order saved successfully. Order ID: ${res.orderId}`);
 
-    const url = `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(msg)}`;
-    window.open(url, "_blank");
+    // OPTIONAL: open WhatsApp as *contact only* (remove if you don't want auto-open)
+    // const msg = buildWhatsAppOrderMessage({ items: itemsNormalized, total: res.total, shipping });
+    // openWhatsAppContact(msg);
+  };
+
+  const onWhatsAppSupport = () => {
+    // contact-only button (no ordering)
+    openWhatsAppContact("Hi, I need support regarding products / orders.");
   };
 
   return (
-    <div className="max-w-3xl mx-auto bg-white rounded-2xl border border-[#e8dccb] p-6">
-      <h2 className="text-xl font-semibold mb-4">Delivery Details</h2>
+    <div className="mt-6">
+      <div className="card p-6">
+        <h3 className="text-xl font-bold mb-4">Checkout</h3>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <Field label="Full Name *" value={form.full_name} onChange={(v) => setForm({ ...form, full_name: v })} />
-        <Field label="Email *" value={form.email} onChange={(v) => setForm({ ...form, email: v })} />
-        <Field label="Phone *" value={form.phone} onChange={(v) => setForm({ ...form, phone: v })} />
+        <div className="grid md:grid-cols-2 gap-4">
+          <Input
+            label="Full Name *"
+            value={form.full_name}
+            onChange={(v) => setForm({ ...form, full_name: v })}
+          />
+          <Input
+            label="Email *"
+            value={form.email}
+            onChange={(v) => setForm({ ...form, email: v })}
+          />
+          <Input
+            label="Phone *"
+            value={form.phone}
+            onChange={(v) => setForm({ ...form, phone: v })}
+          />
+          <Input
+            label="Country *"
+            value={form.country}
+            onChange={(v) => setForm({ ...form, country: v })}
+          />
 
-        <Field label="Address Line 1 *" value={form.address_line1} onChange={(v) => setForm({ ...form, address_line1: v })} />
-        <Field label="Address Line 2" value={form.address_line2} onChange={(v) => setForm({ ...form, address_line2: v })} />
+          <div className="md:col-span-2">
+            <Input
+              label="Address Line 1 *"
+              value={form.address_line1}
+              onChange={(v) => setForm({ ...form, address_line1: v })}
+            />
+          </div>
 
-        <Field label="City *" value={form.city} onChange={(v) => setForm({ ...form, city: v })} />
-        <Field label="State *" value={form.state} onChange={(v) => setForm({ ...form, state: v })} />
-        <Field label="Postal Code *" value={form.postal_code} onChange={(v) => setForm({ ...form, postal_code: v })} />
-        <Field label="Country *" value={form.country} onChange={(v) => setForm({ ...form, country: v })} />
+          <div className="md:col-span-2">
+            <Input
+              label="Address Line 2"
+              value={form.address_line2}
+              onChange={(v) => setForm({ ...form, address_line2: v })}
+            />
+          </div>
+
+          <Input
+            label="City *"
+            value={form.city}
+            onChange={(v) => setForm({ ...form, city: v })}
+          />
+          <Input
+            label="State *"
+            value={form.state}
+            onChange={(v) => setForm({ ...form, state: v })}
+          />
+          <Input
+            label="Postal Code *"
+            value={form.postal_code}
+            onChange={(v) => setForm({ ...form, postal_code: v })}
+          />
+        </div>
+
+        {err && <div className="mt-4 text-sm text-red-600">{err}</div>}
+        {success && <div className="mt-4 text-sm text-green-700">{success}</div>}
+
+        <button
+          className="btn-primary mt-6 w-full"
+          onClick={onSubmit}
+          disabled={loading}
+          type="button"
+        >
+          {loading ? "Processing..." : "Place Order"}
+        </button>
+
+        <button
+          className="btn-secondary mt-3 w-full"
+          onClick={onWhatsAppSupport}
+          type="button"
+        >
+          Contact on WhatsApp
+        </button>
       </div>
-
-      {err && <div className="mt-4 text-sm text-red-600">{err}</div>}
-
-      <button
-        type="button"
-        onClick={onSend}
-        disabled={loading}
-        className="btn-primary mt-6 w-full"
-      >
-        {loading ? "Saving order..." : "Send Order on WhatsApp"}
-      </button>
     </div>
   );
 }
 
-function Field({
+function Input({
   label,
   value,
   onChange,
@@ -135,13 +205,13 @@ function Field({
   onChange: (v: string) => void;
 }) {
   return (
-    <label className="block">
-      <div className="text-sm font-semibold mb-1">{label}</div>
+    <div>
+      <label className="block text-sm font-semibold mb-1">{label}</label>
       <input
-        className="w-full px-4 py-3 rounded-xl border border-[#e8dccb] focus:outline-none"
+        className="w-full px-4 py-3 rounded-2xl border border-gold bg-[#fffaf2] focus:outline-none focus:ring-2 focus:ring-gold/40"
         value={value}
         onChange={(e) => onChange(e.target.value)}
       />
-    </label>
+    </div>
   );
 }
