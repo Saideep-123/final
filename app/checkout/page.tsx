@@ -21,7 +21,6 @@ type Shipping = {
 };
 
 const STORAGE_KEY = "konaseema_shipping_v1";
-const WHATSAPP_NUMBER = "91XXXXXXXXXX"; // TODO: replace (no +)
 
 function requiredLabel(text: string) {
   return (
@@ -51,6 +50,7 @@ export default function CheckoutPage() {
   const [touched, setTouched] = useState<Record<string, boolean>>({});
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
   useEffect(() => {
     try {
@@ -91,42 +91,24 @@ export default function CheckoutPage() {
 
   const isValid = Object.keys(errors).length === 0;
 
-  const buildWhatsAppText = (orderId: number) => {
-    const lines = cart.items.map((i: any) => {
-      const w = i.weight ? ` (${i.weight})` : "";
-      return `• ${i.name}${w} x${i.qty} = ₹${i.qty * i.price}`;
-    });
-
-    const shipLines = [
-      `Order ID: ${orderId}`,
-      `Name: ${shipping.fullName}`,
-      `Email: ${shipping.email}`,
-      `Phone: ${shipping.phone}`,
-      `Country: ${shipping.country}`,
-      `Address: ${shipping.address1}${shipping.address2.trim() ? ", " + shipping.address2.trim() : ""}`,
-      `City/State/ZIP: ${shipping.city}, ${shipping.state} ${shipping.zip}`,
-      shipping.deliveryNotes.trim() ? `Notes: ${shipping.deliveryNotes.trim()}` : null,
-    ].filter(Boolean);
-
-    return [
-      "Hi Konaseema Foods, I want to order:",
-      ...lines,
-      "",
-      `Total: ₹${cart.total}`,
-      "",
-      "Delivery Details:",
-      ...shipLines,
-    ].join("\n");
-  };
-
-  const saveOrderToDb = async (): Promise<number> => {
-    // must be logged in (RLS expects auth.uid())
+  /**
+   * Saves:
+   * 1) addresses
+   * 2) orders
+   * 3) order_items
+   *
+   * IMPORTANT:
+   * - Your DB must have these tables/columns matching what we insert below.
+   * - RLS must allow INSERT for logged-in user (auth.uid()).
+   */
+  const saveOrderToDb = async (): Promise<string> => {
+    // 0) must be logged in
     const { data: userData, error: userErr } = await supabase.auth.getUser();
     if (userErr) throw new Error(userErr.message);
     if (!userData.user) throw new Error("Please login to place the order.");
-
     const userId = userData.user.id;
 
+    // totals
     const subtotal = cart.items.reduce(
       (s: number, it: any) => s + Number(it.price) * Number(it.qty),
       0
@@ -134,7 +116,7 @@ export default function CheckoutPage() {
     const shippingFee = 0;
     const total = subtotal + shippingFee;
 
-    // 1) Address (your columns match this)
+    // 1) insert address (matches your shown columns)
     const { data: address, error: addrErr } = await supabase
       .from("addresses")
       .insert({
@@ -147,14 +129,17 @@ export default function CheckoutPage() {
         city: shipping.city.trim(),
         state: shipping.state.trim(),
         postal_code: shipping.zip.trim(),
-        country: shipping.country.trim(),
+        country: shipping.country.trim() || "United States",
       })
       .select("id")
       .single();
 
-    if (addrErr) throw new Error(addrErr.message);
+    if (addrErr) {
+      console.log("ADDR ERROR FULL:", addrErr);
+      throw new Error(addrErr.message);
+    }
 
-    // 2) Order
+    // 2) insert order (your table must have these columns)
     const { data: order, error: orderErr } = await supabase
       .from("orders")
       .insert({
@@ -170,24 +155,32 @@ export default function CheckoutPage() {
       .select("id")
       .single();
 
-    if (orderErr) throw new Error(orderErr.message);
+    if (orderErr) {
+      console.log("ORDER ERROR FULL:", orderErr);
+      throw new Error(orderErr.message);
+    }
 
-    // 3) Order items (keep minimal to avoid column mismatch)
+    // 3) insert order items (keep minimal to avoid column mismatch)
     const itemsPayload = cart.items.map((i: any) => ({
       order_id: order.id,
       product_id: String(i.id),
-      name: String(i.name),
+      name: i.name,
       price: Number(i.price),
       qty: Number(i.qty),
     }));
 
     const { error: itemsErr } = await supabase.from("order_items").insert(itemsPayload);
-    if (itemsErr) throw new Error(itemsErr.message);
 
-    return Number(order.id);
+    if (itemsErr) {
+      console.log("ITEMS ERROR FULL:", itemsErr);
+      throw new Error(itemsErr.message);
+    }
+
+    return String(order.id);
   };
 
-  const onSendWhatsApp = async () => {
+  // ✅ TEST MODE: Save only, NO WhatsApp open
+  const onSendOrder = async () => {
     setTouched({
       fullName: true,
       email: true,
@@ -204,14 +197,16 @@ export default function CheckoutPage() {
 
     try {
       setSaveError(null);
+      setSuccessMsg(null);
       setSaving(true);
 
       const orderId = await saveOrderToDb();
+      setSuccessMsg(`✅ Order saved to database. Order ID: ${orderId}`);
 
-      const msg = buildWhatsAppText(orderId);
-      const link = `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(msg)}`;
-      window.open(link, "_blank");
+      // optional: clear cart after save
+      // cart.clear();
     } catch (e: any) {
+      console.log("SAVE ERROR FULL:", e);
       setSaveError(e?.message || "Failed to save order. Please try again.");
     } finally {
       setSaving(false);
@@ -230,17 +225,21 @@ export default function CheckoutPage() {
           <div className="mb-8">
             <h1 className="text-4xl mb-2">Checkout</h1>
             <p className="opacity-75">
-              Required fields are marked with <span className="text-red-600">*</span>.
+              Test mode: we will only save the order to Supabase and show Order ID. Required
+              fields are marked with <span className="text-red-600">*</span>.
             </p>
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-5 gap-8">
+            {/* LEFT: Delivery form */}
             <section className="lg:col-span-3 premium-card p-6">
               <h2 className="text-2xl mb-4">Delivery Details</h2>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="md:col-span-2">
-                  <label className="block text-sm font-semibold mb-1">{requiredLabel("Full Name")}</label>
+                  <label className="block text-sm font-semibold mb-1">
+                    {requiredLabel("Full Name")}
+                  </label>
                   <input
                     value={shipping.fullName}
                     onChange={(e) => setShipping((s) => ({ ...s, fullName: e.target.value }))}
@@ -248,11 +247,15 @@ export default function CheckoutPage() {
                     className={`${inputBase} ${touched.fullName && errors.fullName ? inputErr : ""}`}
                     placeholder="Recipient full name"
                   />
-                  {touched.fullName && errors.fullName && <p className="text-sm text-red-600 mt-1">{errors.fullName}</p>}
+                  {touched.fullName && errors.fullName && (
+                    <p className="text-sm text-red-600 mt-1">{errors.fullName}</p>
+                  )}
                 </div>
 
                 <div>
-                  <label className="block text-sm font-semibold mb-1">{requiredLabel("Email")}</label>
+                  <label className="block text-sm font-semibold mb-1">
+                    {requiredLabel("Email")}
+                  </label>
                   <input
                     value={shipping.email}
                     onChange={(e) => setShipping((s) => ({ ...s, email: e.target.value }))}
@@ -260,23 +263,31 @@ export default function CheckoutPage() {
                     className={`${inputBase} ${touched.email && errors.email ? inputErr : ""}`}
                     placeholder="name@example.com"
                   />
-                  {touched.email && errors.email && <p className="text-sm text-red-600 mt-1">{errors.email}</p>}
+                  {touched.email && errors.email && (
+                    <p className="text-sm text-red-600 mt-1">{errors.email}</p>
+                  )}
                 </div>
 
                 <div>
-                  <label className="block text-sm font-semibold mb-1">{requiredLabel("Mobile / Phone")}</label>
+                  <label className="block text-sm font-semibold mb-1">
+                    {requiredLabel("Mobile / Phone")}
+                  </label>
                   <input
                     value={shipping.phone}
                     onChange={(e) => setShipping((s) => ({ ...s, phone: e.target.value }))}
                     onBlur={() => setTouched((t) => ({ ...t, phone: true }))}
                     className={`${inputBase} ${touched.phone && errors.phone ? inputErr : ""}`}
-                    placeholder="Phone number"
+                    placeholder="US phone number"
                   />
-                  {touched.phone && errors.phone && <p className="text-sm text-red-600 mt-1">{errors.phone}</p>}
+                  {touched.phone && errors.phone && (
+                    <p className="text-sm text-red-600 mt-1">{errors.phone}</p>
+                  )}
                 </div>
 
                 <div className="md:col-span-2">
-                  <label className="block text-sm font-semibold mb-1">{requiredLabel("Country")}</label>
+                  <label className="block text-sm font-semibold mb-1">
+                    {requiredLabel("Country")}
+                  </label>
                   <input
                     value={shipping.country}
                     onChange={(e) => setShipping((s) => ({ ...s, country: e.target.value }))}
@@ -284,11 +295,15 @@ export default function CheckoutPage() {
                     className={`${inputBase} ${touched.country && errors.country ? inputErr : ""}`}
                     placeholder="United States"
                   />
-                  {touched.country && errors.country && <p className="text-sm text-red-600 mt-1">{errors.country}</p>}
+                  {touched.country && errors.country && (
+                    <p className="text-sm text-red-600 mt-1">{errors.country}</p>
+                  )}
                 </div>
 
                 <div className="md:col-span-2">
-                  <label className="block text-sm font-semibold mb-1">{requiredLabel("Address Line 1")}</label>
+                  <label className="block text-sm font-semibold mb-1">
+                    {requiredLabel("Address Line 1")}
+                  </label>
                   <input
                     value={shipping.address1}
                     onChange={(e) => setShipping((s) => ({ ...s, address1: e.target.value }))}
@@ -296,7 +311,9 @@ export default function CheckoutPage() {
                     className={`${inputBase} ${touched.address1 && errors.address1 ? inputErr : ""}`}
                     placeholder="Street address, house number"
                   />
-                  {touched.address1 && errors.address1 && <p className="text-sm text-red-600 mt-1">{errors.address1}</p>}
+                  {touched.address1 && errors.address1 && (
+                    <p className="text-sm text-red-600 mt-1">{errors.address1}</p>
+                  )}
                 </div>
 
                 <div className="md:col-span-2">
@@ -310,7 +327,9 @@ export default function CheckoutPage() {
                 </div>
 
                 <div>
-                  <label className="block text-sm font-semibold mb-1">{requiredLabel("City")}</label>
+                  <label className="block text-sm font-semibold mb-1">
+                    {requiredLabel("City")}
+                  </label>
                   <input
                     value={shipping.city}
                     onChange={(e) => setShipping((s) => ({ ...s, city: e.target.value }))}
@@ -318,11 +337,15 @@ export default function CheckoutPage() {
                     className={`${inputBase} ${touched.city && errors.city ? inputErr : ""}`}
                     placeholder="City"
                   />
-                  {touched.city && errors.city && <p className="text-sm text-red-600 mt-1">{errors.city}</p>}
+                  {touched.city && errors.city && (
+                    <p className="text-sm text-red-600 mt-1">{errors.city}</p>
+                  )}
                 </div>
 
                 <div>
-                  <label className="block text-sm font-semibold mb-1">{requiredLabel("State")}</label>
+                  <label className="block text-sm font-semibold mb-1">
+                    {requiredLabel("State")}
+                  </label>
                   <input
                     value={shipping.state}
                     onChange={(e) => setShipping((s) => ({ ...s, state: e.target.value }))}
@@ -330,11 +353,15 @@ export default function CheckoutPage() {
                     className={`${inputBase} ${touched.state && errors.state ? inputErr : ""}`}
                     placeholder="State"
                   />
-                  {touched.state && errors.state && <p className="text-sm text-red-600 mt-1">{errors.state}</p>}
+                  {touched.state && errors.state && (
+                    <p className="text-sm text-red-600 mt-1">{errors.state}</p>
+                  )}
                 </div>
 
                 <div className="md:col-span-2">
-                  <label className="block text-sm font-semibold mb-1">{requiredLabel("ZIP / Postal Code")}</label>
+                  <label className="block text-sm font-semibold mb-1">
+                    {requiredLabel("ZIP / Postal Code")}
+                  </label>
                   <input
                     value={shipping.zip}
                     onChange={(e) => setShipping((s) => ({ ...s, zip: e.target.value }))}
@@ -342,14 +369,18 @@ export default function CheckoutPage() {
                     className={`${inputBase} ${touched.zip && errors.zip ? inputErr : ""}`}
                     placeholder="ZIP code"
                   />
-                  {touched.zip && errors.zip && <p className="text-sm text-red-600 mt-1">{errors.zip}</p>}
+                  {touched.zip && errors.zip && (
+                    <p className="text-sm text-red-600 mt-1">{errors.zip}</p>
+                  )}
                 </div>
 
                 <div className="md:col-span-2">
                   <label className="block text-sm font-semibold mb-1">Delivery Notes</label>
                   <textarea
                     value={shipping.deliveryNotes}
-                    onChange={(e) => setShipping((s) => ({ ...s, deliveryNotes: e.target.value }))}
+                    onChange={(e) =>
+                      setShipping((s) => ({ ...s, deliveryNotes: e.target.value }))
+                    }
                     className={`${inputBase} min-h-[110px]`}
                     placeholder="Any special instructions (optional)"
                   />
@@ -367,19 +398,32 @@ export default function CheckoutPage() {
 
                 <button
                   className="btn-primary w-full sm:flex-1"
-                  onClick={onSendWhatsApp}
+                  onClick={onSendOrder}
                   type="button"
                   disabled={!isValid || cart.items.length === 0 || saving}
                 >
-                  {saving ? "Saving Order..." : "Send Order on WhatsApp"}
+                  {saving ? "Saving Order..." : "Save Order (Test Mode)"}
                 </button>
               </div>
 
+              {successMsg && (
+                <p className="mt-3 text-sm text-green-700 font-semibold">{successMsg}</p>
+              )}
               {saveError && <p className="mt-3 text-sm text-red-600">{saveError}</p>}
-              {!isValid && <p className="mt-3 text-sm text-red-600">Please fill all required fields.</p>}
-              {cart.items.length === 0 && <p className="mt-3 text-sm text-red-600">Your cart is empty.</p>}
+
+              {!isValid && (
+                <p className="mt-3 text-sm text-red-600">
+                  Please fill all required fields to continue.
+                </p>
+              )}
+              {cart.items.length === 0 && (
+                <p className="mt-3 text-sm text-red-600">
+                  Your cart is empty. Add items to proceed.
+                </p>
+              )}
             </section>
 
+            {/* RIGHT: Order summary */}
             <aside className="lg:col-span-2 premium-card p-6 h-fit">
               <h2 className="text-2xl mb-4">Order Summary</h2>
 
@@ -389,7 +433,11 @@ export default function CheckoutPage() {
                 <div className="space-y-4">
                   {cart.items.map((i: any) => (
                     <div key={i.id} className="flex gap-3">
-                      <img src={i.image} className="w-14 h-14 rounded-lg object-cover" alt={i.name} />
+                      <img
+                        src={i.image}
+                        className="w-14 h-14 rounded-lg object-cover"
+                        alt={i.name}
+                      />
                       <div className="flex-1">
                         <div className="flex items-start justify-between gap-4">
                           <div>
@@ -405,14 +453,18 @@ export default function CheckoutPage() {
                               className="px-3 py-1 border border-gold rounded-full"
                               onClick={() => cart.dec(i.id)}
                               type="button"
+                              aria-label={`Decrease ${i.name}`}
                             >
                               -
                             </button>
-                            <span className="min-w-[24px] text-center font-semibold">{i.qty}</span>
+                            <span className="min-w-[24px] text-center font-semibold">
+                              {i.qty}
+                            </span>
                             <button
                               className="px-3 py-1 border border-gold rounded-full"
                               onClick={() => cart.inc(i.id)}
                               type="button"
+                              aria-label={`Increase ${i.name}`}
                             >
                               +
                             </button>
