@@ -177,16 +177,50 @@ export default function CheckoutPage() {
   };
 
   const onPlaceOrder = async () => {
-    setTouched({
-      fullName: true,
-      email: true,
-      phone: true,
-      country: true,
-      address1: true,
-      city: true,
-      state: true,
-      zip: true,
-    });
+  try {
+    // 🔎 PROVE which Supabase project you are hitting
+    console.log("SUPABASE URL:", process.env.NEXT_PUBLIC_SUPABASE_URL);
+
+    const { data: userData } = await supabase.auth.getUser();
+    const userId = userData?.user?.id ?? null;
+
+    const payload = {
+      debug: "attempt_insert",
+      at: new Date().toISOString(),
+      shipping,
+      cart_items: cartItems,
+    };
+
+    // 🔎 PROBE (optional but useful)
+    const probe = await supabase
+      .schema("public")
+      .from("order_attempts")
+      .select("id")
+      .limit(1);
+
+    console.log("probe select:", probe);
+
+    // ✅ ACTUAL INSERT
+    const res = await supabase
+      .schema("public")
+      .from("order_attempts")
+      .insert([{ user_id: userId, payload }])
+      .select("id")
+      .single();
+
+    console.log("order_attempts insert:", res);
+
+    if (res.error) {
+      alert(`DB ERROR: ${res.error.message}`);
+      return;
+    }
+
+    alert(`Saved to DB. Attempt ID: ${res.data.id}`);
+  } catch (e) {
+    console.error("Unexpected error:", e);
+  }
+};
+
 
     if (!isValid) return;
     if (cart.items.length === 0) return;
