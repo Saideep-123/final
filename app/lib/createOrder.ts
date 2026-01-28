@@ -1,137 +1,95 @@
+// app/lib/createOrder.ts
 import { supabase } from "./supabaseClient";
 
 export type CartItem = {
-  id: number;
+  id: string; // ✅ changed from number -> string to match CartContext
   name: string;
   price: number;
   qty: number;
-  image?: string;
-  weight?: string;
-  category?: string;
 };
 
-export type ShippingInput = {
+export type ShippingPayload = {
   full_name: string;
   email: string;
   phone: string;
   address_line1: string;
-  address_line2?: string;
+  address_line2?: string | null;
   city: string;
   state: string;
   postal_code: string;
-  country?: string; // default US
+  country: string;
 };
 
 export async function createOrderInDb(args: {
   items: CartItem[];
-  shipping: ShippingInput;
+  shipping: ShippingPayload;
   currency?: string;
-  notes?: string;
+  notes?: string | null;
 }) {
-  const { items, shipping, currency = "INR", notes } = args;
-
-  if (!items || items.length === 0) {
-    return { ok: false as const, error: "Cart is empty" };
-  }
-
-  // Require login (because RLS uses auth.uid())
   const { data: userData, error: userErr } = await supabase.auth.getUser();
-  if (userErr) return { ok: false as const, error: userErr.message };
-  const user = userData.user;
-  if (!user) return { ok: false as const, error: "Please login to place order" };
+  if (userErr) throw new Error(userErr.message);
+  if (!userData.user) throw new Error("Please login to place the order.");
 
-  // totals
-  const subtotal = items.reduce((s, it) => s + Number(it.price) * Number(it.qty), 0);
-  const shippingFee = 0; // adjust later if needed
-  const total = subtotal + shippingFee;
+  const user_id = userData.user.id;
 
-  // 1) insert address
-  const { data: addressRow, error: addrErr } = await supabase
+  const subtotal = args.items.reduce(
+    (sum, it) => sum + Number(it.price) * Number(it.qty),
+    0
+  );
+
+  const shippingFee = 0;
+  const tax = 0;
+  const total = subtotal + shippingFee + tax;
+
+  // 1) address
+  const { data: address, error: addrErr } = await supabase
     .from("addresses")
     .insert({
-      user_id: user.id,
-      full_name: shipping.full_name,
-      email: shipping.email,
-      phone: shipping.phone,
-      address_line1: shipping.address_line1,
-      address_line2: shipping.address_line2 ?? null,
-      city: shipping.city,
-      state: shipping.state,
-      postal_code: shipping.postal_code,
-      country: shipping.country ?? "US",
+      user_id,
+      full_name: args.shipping.full_name,
+      email: args.shipping.email,
+      phone: args.shipping.phone,
+      address_line1: args.shipping.address_line1,
+      address_line2: args.shipping.address_line2 ?? null,
+      city: args.shipping.city,
+      state: args.shipping.state,
+      postal_code: args.shipping.postal_code,
+      country: args.shipping.country,
     })
     .select("id")
     .single();
 
-  if (addrErr) return { ok: false as const, error: addrErr.message };
+  if (addrErr) throw new Error(addrErr.message);
 
-  // 2) insert order
-  const { data: orderRow, error: orderErr } = await supabase
+  // 2) order
+  const { data: order, error: orderErr } = await supabase
     .from("orders")
     .insert({
-      user_id: user.id,
-      address_id: addressRow.id,
-      currency,
+      user_id,
+      address_id: address.id,
       status: "pending",
+      currency: args.currency ?? "INR",
       subtotal,
       shipping: shippingFee,
       total,
-      notes: notes ?? null,
+      notes: args.notes ?? null,
     })
     .select("id")
     .single();
 
-  if (orderErr) return { ok: false as const, error: orderErr.message };
+  if (orderErr) throw new Error(orderErr.message);
 
-  // 3) insert items
-  const payload = items.map((it) => ({
-    order_id: orderRow.id,
-    product_id: it.id,
-    name: it.name,
-    price: it.price,
-    qty: it.qty,
-    image: it.image ?? null,
-    weight: it.weight ?? null,
-    category: it.category ?? null,
+  // 3) order items
+  const itemsPayload = args.items.map((i) => ({
+    order_id: order.id,
+    product_id: i.id, // ✅ keep as string
+    name: i.name,
+    price: Number(i.price),
+    qty: Number(i.qty),
   }));
 
-  const { error: itemsErr } = await supabase.from("order_items").insert(payload);
-  if (itemsErr) return { ok: false as const, error: itemsErr.message };
+  const { error: itemsErr } = await supabase.from("order_items").insert(itemsPayload);
+  if (itemsErr) throw new Error(itemsErr.message);
 
-  return {
-    ok: true as const,
-    orderId: orderRow.id as number,
-    totals: { subtotal, shipping: shippingFee, total, currency },
-  };
-}
-
-export function buildWhatsAppOrderMessage(args: {
-  orderId: number;
-  items: CartItem[];
-  shipping: ShippingInput;
-  totals: { subtotal: number; shipping: number; total: number; currency: string };
-}) {
-  const { orderId, items, shipping, totals } = args;
-
-  const lines: string[] = [];
-  lines.push(`New Order ✅`);
-  lines.push(`Order ID: ${orderId}`);
-  lines.push(``);
-  lines.push(`Customer: ${shipping.full_name}`);
-  lines.push(`Email: ${shipping.email}`);
-  lines.push(`Phone: ${shipping.phone}`);
-  lines.push(
-    `Address: ${shipping.address_line1}${shipping.address_line2 ? ", " + shipping.address_line2 : ""}, ${shipping.city}, ${shipping.state} ${shipping.postal_code}, ${shipping.country ?? "US"}`
-  );
-  lines.push(``);
-  lines.push(`Items:`);
-  for (const it of items) {
-    lines.push(`- ${it.name} x${it.qty} = ${totals.currency} ${it.price * it.qty}`);
-  }
-  lines.push(``);
-  lines.push(`Subtotal: ${totals.currency} ${totals.subtotal}`);
-  lines.push(`Shipping: ${totals.currency} ${totals.shipping}`);
-  lines.push(`Total: ${totals.currency} ${totals.total}`);
-
-  return lines.join("\n");
+  return { orderId: String(order.id), total };
 }
